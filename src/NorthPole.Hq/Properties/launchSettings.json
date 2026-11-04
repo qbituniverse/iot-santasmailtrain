@@ -1,0 +1,21 @@
+{
+  "profiles": {
+    "Laptop (simulation)": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "elves",
+      "applicationUrl": "http://localhost:8080",
+      "environmentVariables": { "ASPNETCORE_ENVIRONMENT": "Development" }
+    },
+    "Laptop with real Claude": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "elves",
+      "applicationUrl": "http://localhost:8080",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "NorthPole__Santa__Brain": "Claude"
+      }
+    }
+  }
+}

@@ -1,0 +1,41 @@
+# ---- .NET build output ----
+bin/
+obj/
+out/
+publish/
+artifacts/
+*.nupkg
+*.snupkg
+TestResults/
+*.trx
+*.coverage
+coverage*.xml
+
+# ---- The apps' own data: children's letters, drawings, card codes (private) ----
+data/
+data-dev/
+
+# ---- Secrets: on the Pi they live in /etc/northpole/hq.env, on a laptop in user secrets ----
+*.env
+.env*
+secrets.json
+appsettings.*.local.json
+
+# ---- JetBrains Rider ----
+.idea/
+*.sln.iml
+*.DotSettings.user
+_ReSharper*/
+*.[Rr]e[Ss]harper
+
+# ---- Visual Studio and VS Code ----
+.vs/
+.vscode/
+*.user
+*.suo
+*.userprefs
+
+# ---- Operating systems ----
+.DS_Store
+Thumbs.db
+desktop.ini

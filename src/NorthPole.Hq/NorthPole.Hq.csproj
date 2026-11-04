@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- Runs on the Raspberry Pi 5 at the "North Pole" station (with a speaker).
+       Serves the kids' wish pages, prints QR cards and LEGO mosaic plans, asks Claude to write Santa's reply,
+       speaks it with Piper, and tells the signal box when to run the mail train. -->
+  <PropertyGroup>
+    <UserSecretsId>northpole-hq</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Anthropic" Version="13.*" />
+    <PackageReference Include="QRCoder" Version="1.8.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NorthPole.Contracts\NorthPole.Contracts.csproj" />
+    <ProjectReference Include="..\NorthPole.Messaging\NorthPole.Messaging.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Small MQTT wrapper shared by HQ and the signal box: typed publish/subscribe and auto-reconnect,
+       plus the optional embedded broker so you don't have to install Mosquitto. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MQTTnet" Version="5.2.0.1603" />
+    <PackageReference Include="MQTTnet.Server" Version="5.2.0.1603" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NorthPole.Contracts\NorthPole.Contracts.csproj" />
+  </ItemGroup>
+</Project>

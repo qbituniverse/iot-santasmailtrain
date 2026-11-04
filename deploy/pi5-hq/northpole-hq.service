@@ -1,0 +1,20 @@
+[Unit]
+Description=North Pole HQ (Santa's Mail Train)
+After=network-online.target piper.service
+Wants=network-online.target
+
+[Service]
+User=__USER__
+SupplementaryGroups=audio
+# Port 80 keeps the QR URL short (http://np.local/W/K7Q2): a 21x21 code you can build from LEGO.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+WorkingDirectory=/opt/northpole/hq
+ExecStart=/opt/dotnet/dotnet /opt/northpole/hq/NorthPole.Hq.dll
+Environment=DOTNET_ROOT=/opt/dotnet
+Environment=ASPNETCORE_ENVIRONMENT=Production
+EnvironmentFile=/etc/northpole/hq.env
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

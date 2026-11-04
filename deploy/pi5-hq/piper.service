@@ -1,0 +1,12 @@
+[Unit]
+Description=Piper text-to-speech (Santa's voice)
+After=network.target
+
+[Service]
+User=__USER__
+ExecStart=/opt/piper/bin/python -m piper.http_server -m en_GB-northern_english_male-medium --data-dir /opt/piper/voices --host 127.0.0.1 --port 5000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

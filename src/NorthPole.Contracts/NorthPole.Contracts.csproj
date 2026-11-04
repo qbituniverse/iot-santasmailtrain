@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Shared message contracts between the Pi 5 (HQ) and the Pi 4 (signal box).
+       No package dependencies, so a future Unity digital twin can copy these files as-is. -->
+</Project>

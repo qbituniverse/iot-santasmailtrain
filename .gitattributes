@@ -1,0 +1,14 @@
+# Git stores text with LF line endings and converts as needed on checkout.
+* text=auto
+
+# These run on the Raspberry Pis, so they keep LF even in a Windows checkout:
+# a CRLF script fails in bash, and systemd would read the \r into each setting.
+*.sh      text eol=lf
+*.service text eol=lf
+
+# Visual Studio's solution file expects CRLF.
+*.sln     text eol=crlf
+
+*.png binary
+*.jpg binary
+*.wav binary

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Runs on the Raspberry Pi 4 next to the track.
+       Talks Bluetooth to the LEGO hub (the Pi's own radio through BlueZ, or a BlueGiga BLED112 dongle), drives the
+       GPIO trackside (station sensors, mailbox-flag servo, signal LEDs, the 16x2 station board) and takes jobs from
+       HQ over MQTT. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UserSecretsId>northpole-signalbox</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Generic host, config, logging, DI (shared framework: no extra download on the Pi). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- BlueZ train mode. The 6.0 preview depends on Tmds.DBus 0.92, which fixes GHSA-xrw6-gwf8-vvr9;
+         the stable 5.67.1 still pulls the vulnerable Tmds.DBus 0.20. -->
+    <PackageReference Include="Linux.Bluetooth" Version="6.0.0-pre3" />
+    <PackageReference Include="MQTTnet" Version="5.2.0.1603" />
+    <PackageReference Include="SharpBrick.PoweredUp" Version="5.0.2" />
+    <PackageReference Include="SharpBrick.PoweredUp.BlueGigaBLE" Version="5.0.2" />
+    <PackageReference Include="System.Device.Gpio" Version="4.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.Extensions.Configuration" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Microsoft.Extensions.Hosting" />
+    <Using Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NorthPole.Contracts\NorthPole.Contracts.csproj" />
+    <ProjectReference Include="..\NorthPole.Messaging\NorthPole.Messaging.csproj" />
+  </ItemGroup>
+</Project>

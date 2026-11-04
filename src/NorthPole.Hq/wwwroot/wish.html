@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0e3b2c">
+  <title>Letter to Santa</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/css/site.css">
+</head>
+<body class="kid">
+  <div class="snow" aria-hidden="true"></div>
+
+  <main class="wrap">
+    <header class="hello">
+      <p class="day" id="day">&nbsp;</p>
+      <h1 id="hello">Hello!</h1>
+      <p class="sleeps" id="sleeps"></p>
+    </header>
+
+    <section id="compose" class="card" hidden>
+      <form id="wishForm" novalidate>
+        <label for="wishText" class="letter-label">Dear Santa, today I wish for…</label>
+        <textarea id="wishText" maxlength="1000" autocomplete="off"
+                  placeholder="Write your wish here. You can ask a grown-up to help!"></textarea>
+        <div class="row">
+          <label class="btn ghost" for="photo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+            <span id="photoLabel">Add a drawing</span>
+          </label>
+          <input id="photo" type="file" accept="image/*" capture="environment" hidden>
+          <img id="preview" alt="Your drawing" hidden>
+        </div>
+        <p class="error" id="error" role="alert"></p>
+        <button class="btn big" type="submit" id="send">Send to the North Pole</button>
+      </form>
+    </section>
+
+    <section id="journey" class="card" hidden aria-live="polite">
+      <svg class="railway" viewBox="0 0 320 96" role="img" aria-label="The mail train between your mailbox and the North Pole">
+        <line x1="20" y1="74" x2="300" y2="74" stroke="#cdbfa9" stroke-width="3"/>
+        <g stroke="#cdbfa9" stroke-width="3">
+          <line x1="40" y1="70" x2="40" y2="78"/><line x1="80" y1="70" x2="80" y2="78"/><line x1="120" y1="70" x2="120" y2="78"/>
+          <line x1="160" y1="70" x2="160" y2="78"/><line x1="200" y1="70" x2="200" y2="78"/><line x1="240" y1="70" x2="240" y2="78"/>
+          <line x1="280" y1="70" x2="280" y2="78"/>
+        </g>
+        <!-- mailbox -->
+        <rect x="14" y="40" width="30" height="20" rx="10" fill="#c62a3a"/>
+        <rect x="26" y="60" width="6" height="12" fill="#6f655d"/>
+        <rect x="40" y="30" width="3" height="14" fill="#f1b437"/>
+        <text class="label" x="29" y="92" text-anchor="middle">Mailbox</text>
+        <!-- North Pole -->
+        <rect x="286" y="14" width="7" height="58" rx="3" fill="#fff" stroke="#c62a3a" stroke-width="2"/>
+        <path d="M287 22l5-4M287 32l5-4M287 42l5-4M287 52l5-4M287 62l5-4" stroke="#c62a3a" stroke-width="2"/>
+        <circle cx="289.5" cy="11" r="5" fill="#f1b437"/>
+        <text class="label" x="289" y="92" text-anchor="middle">North Pole</text>
+        <!-- the train -->
+        <g id="train" class="at-start">
+          <g class="wheels" fill="#2a2522"><circle cx="60" cy="70" r="3.5"/><circle cx="72" cy="70" r="3.5"/><circle cx="54" cy="70" r="0"/></g>
+          <path d="M50 66V54h18l8 6v6z" fill="#fffaf1" stroke="#2a2522" stroke-width="1.5" stroke-linejoin="round"/>
+          <rect x="54" y="57" width="7" height="5" rx="1" fill="#9fd3ff"/>
+          <rect x="47" y="58" width="6" height="5" rx="1" fill="#f1b437"/>
+        </g>
+      </svg>
+
+      <ol id="timeline" class="timeline"></ol>
+
+      <div id="reply" class="santa-letter" hidden>
+        <p class="from">A letter from Santa</p>
+        <p id="replyText" class="text"></p>
+        <button type="button" class="btn" id="listen" hidden>
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          Hear Santa
+        </button>
+        <audio id="voice" preload="none"></audio>
+      </div>
+
+      <p id="tomorrow" class="tomorrow" hidden></p>
+      <button type="button" class="btn ghost big" id="another" hidden>Write another wish</button>
+    </section>
+
+    <section id="earlier" hidden>
+      <h2>Your letters to Santa</h2>
+      <ul id="earlierList"></ul>
+    </section>
+  </main>
+
+<script>
+(() => {
+  const code = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || '');
+  const $ = id => document.getElementById(id);
+  let photoBlob = null;
+  let stream = null;
+
+  // A few snowflakes.
+  const snow = document.querySelector('.snow');
+  for (let i = 0; i < 26; i++) {
+    const f = document.createElement('span');
+    const size = 2 + Math.random() * 5;
+    f.className = 'flake';
+    f.style.cssText = `left:${Math.random() * 100}vw;width:${size}px;height:${size}px;` +
+      `animation-duration:${7 + Math.random() * 9}s;animation-delay:${-Math.random() * 12}s;--drift:${(Math.random() - .5) * 60}px`;
+    snow.appendChild(f);
+  }
+
+  const fmtDay = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+
+  async function load() {
+    const res = await fetch(`/api/kid/${encodeURIComponent(code)}`);
+    if (!res.ok) { $('hello').textContent = 'Hmm, this card is not working.'; return; }
+    const home = await res.json();
+
+    $('day').textContent = home.dayLabel;
+    $('hello').textContent = `Hello, ${home.name}!`;
+    $('sleeps').textContent = home.sleepsToChristmas === 0 ? 'Merry Christmas!'
+      : `${home.sleepsToChristmas} sleep${home.sleepsToChristmas === 1 ? '' : 's'} until Christmas`;
+
+    renderEarlier(home.earlier);
+
+    const latest = home.latest;
+    if (latest && !latest.isFinal) { showJourney(latest); follow(latest.id); return; }
+    if (home.canWishNow) { showCompose(); if (latest) renderEarlier([latest, ...home.earlier]); return; }
+    if (latest) { showJourney(latest); }
+  }
+
+  function showCompose() {
+    $('compose').hidden = false;
+    $('journey').hidden = true;
+    $('wishText').focus({ preventScroll: true });
+  }
+
+  function showJourney(view) {
+    $('compose').hidden = true;
+    $('journey').hidden = false;
+    render(view);
+  }
+
+  function render(v) {
+    const stages = v.timeline.map(e => e.stage);
+    const last = stages[stages.length - 1];
+    const train = $('train');
+    train.classList.remove('at-start', 'on-way', 'arrived', 'reindeer');
+    if (stages.includes('reindeer')) train.classList.add('at-start', 'reindeer');
+    else if (stages.includes('arrived') || v.status === 'AtTheNorthPole' || v.status === 'Answered') train.classList.add('arrived');
+    else if (stages.includes('departed')) train.classList.add('on-way');
+    else train.classList.add('at-start');
+
+    $('timeline').innerHTML = '';
+    v.timeline.forEach((e, i) => {
+      const li = document.createElement('li');
+      li.textContent = e.message;
+      if (i === v.timeline.length - 1 && !v.isFinal) li.className = 'current';
+      $('timeline').appendChild(li);
+    });
+
+    if (v.santaReply) {
+      $('reply').hidden = false;
+      $('replyText').textContent = v.santaReply;
+      $('listen').hidden = !v.hasVoice;
+      $('voice').src = v.hasVoice ? `/api/wish/${v.id}/voice` : '';
+      $('tomorrow').hidden = false;
+      $('tomorrow').textContent = 'Santa will be listening for tomorrow\'s wish!';
+    } else {
+      $('reply').hidden = true;
+      $('tomorrow').hidden = true;
+    }
+    if (last === 'oops') { $('tomorrow').hidden = false; $('tomorrow').textContent = 'Ask a grown-up to check on the elves.'; }
+  }
+
+  function follow(id) {
+    stream?.close();
+    stream = new EventSource(`/api/wish/${id}/events`);
+    stream.addEventListener('wish', e => {
+      const v = JSON.parse(e.data);
+      render(v);
+      if (v.isFinal) { stream.close(); stream = null; refreshAnother(); }
+    });
+  }
+
+  async function refreshAnother() {
+    const res = await fetch(`/api/kid/${encodeURIComponent(code)}`);
+    if (res.ok) $('another').hidden = !(await res.json()).canWishNow;
+  }
+  $('another').addEventListener('click', () => { $('another').hidden = true; $('wishText').value = ''; clearPhoto(); showCompose(); });
+
+  function renderEarlier(list) {
+    const items = (list || []).filter(w => w.isFinal);
+    $('earlier').hidden = items.length === 0;
+    $('earlierList').innerHTML = '';
+    for (const w of items) {
+      const li = document.createElement('li');
+      li.innerHTML = '<div class="when"></div><p class="wish"></p><p class="reply"></p>';
+      li.querySelector('.when').textContent = fmtDay(w.day);
+      li.querySelector('.wish').textContent = `“${w.text}”`;
+      li.querySelector('.reply').textContent = w.santaReply ? `Santa: ${w.santaReply}` : '';
+      $('earlierList').appendChild(li);
+    }
+  }
+
+  // Photos straight off a phone camera are huge: shrink to 1280px JPEG before they board the train.
+  async function shrink(file) {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1280 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+  }
+
+  function clearPhoto() {
+    photoBlob = null;
+    $('preview').hidden = true;
+    $('photoLabel').textContent = 'Add a drawing';
+  }
+
+  $('photo').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      photoBlob = await shrink(file);
+      $('preview').src = URL.createObjectURL(photoBlob);
+      $('preview').hidden = false;
+      $('photoLabel').textContent = 'Change drawing';
+    } catch {
+      clearPhoto();
+      $('error').textContent = 'That picture didn\'t work. Try another one?';
+    }
+  });
+
+  $('wishText').addEventListener('input', () => { $('error').textContent = ''; });
+
+  $('wishForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const text = $('wishText').value.trim();
+    if (!text) { $('error').textContent = 'Write your wish first!'; $('wishText').focus(); return; }
+
+    const body = new FormData();
+    body.append('text', text);
+    if (photoBlob) body.append('photo', photoBlob, 'drawing.jpg');
+
+    $('send').disabled = true;
+    $('send').textContent = 'Posting your letter…';
+    try {
+      const res = await fetch(`/api/kid/${encodeURIComponent(code)}/wish`, { method: 'POST', body });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { $('error').textContent = data.error || 'The mailbox is stuck. Try again in a moment!'; return; }
+      showJourney({ id: data.wishId, timeline: [{ stage: 'mailbox', message: 'Your letter is in the mailbox!' }], status: 'Received', isFinal: false });
+      follow(data.wishId);
+    } catch {
+      $('error').textContent = 'Can\'t reach the North Pole. Are you on the home Wi-Fi?';
+    } finally {
+      $('send').disabled = false;
+      $('send').textContent = 'Send to the North Pole';
+    }
+  });
+
+  $('listen').addEventListener('click', () => { $('voice').currentTime = 0; $('voice').play(); });
+
+  load();
+})();
+</script>
+</body>
+</html>

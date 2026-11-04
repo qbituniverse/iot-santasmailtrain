@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Elves' workshop</title>
+  <link rel="stylesheet" href="/css/site.css">
+</head>
+<body class="elves">
+  <header class="top">
+    <h1>Elves' workshop</h1>
+    <nav><a href="/cards.html">QR cards &amp; LEGO plans</a></nav>
+  </header>
+
+  <section id="login" class="login" hidden>
+    <h2>Grown-ups only</h2>
+    <p class="muted">Enter the elves' PIN</p>
+    <form id="loginForm">
+      <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="12" aria-label="PIN">
+      <button class="btn big" type="submit">Open the workshop</button>
+      <p class="error" id="loginError" role="alert"></p>
+    </form>
+  </section>
+
+  <main id="app" class="page" hidden>
+    <div id="alerts"></div>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>Mail train</h2>
+        <div id="trainStatus" class="muted">Checking…</div>
+        <div class="actions">
+          <button class="btn" data-cmd="TestRun">Test run</button>
+          <button class="btn secondary" data-cmd="Stop">Stop</button>
+          <button class="btn secondary" data-cmd="LightsOn">Lights on</button>
+          <button class="btn secondary" data-cmd="LightsOff">Lights off</button>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>This December</h2>
+        <div class="stat" id="wishCount">0</div>
+        <div class="muted">wishes sent · Claude spend <span id="spend">$0.00</span></div>
+        <div class="actions" id="childActions"></div>
+      </section>
+      <section class="panel">
+        <h2>Shopping list</h2>
+        <div id="shopping" class="muted">Gift ideas will appear here.</div>
+      </section>
+    </div>
+
+    <h2 style="margin:28px 0 0;font-size:18px">All letters</h2>
+    <div id="wishes" class="wishes"></div>
+  </main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const day = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+
+  async function api(path, options) {
+    const res = await fetch('/api/elves' + path, { headers: { 'Content-Type': 'application/json' }, ...options });
+    if (res.status === 401) { showLogin(); throw new Error('login'); }
+    return res;
+  }
+
+  function showLogin() { $('login').hidden = false; $('app').hidden = true; $('pin').focus(); }
+
+  $('loginForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const pin = $('pin').value.trim();
+    if (!pin) { $('loginError').textContent = 'Enter the PIN first'; return; }
+    const res = await fetch('/api/elves/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin }) });
+    if (res.ok) { $('login').hidden = true; $('pin').value = ''; $('loginError').textContent = ''; refresh(); }
+    else $('loginError').textContent = res.status === 429 ? 'Too many tries. Wait 5 minutes.' : 'Wrong PIN';
+  });
+  $('pin').addEventListener('input', () => { $('loginError').textContent = ''; });
+
+  async function refresh() {
+    try {
+      const [summary, wishes, train] = await Promise.all([
+        api('/summary').then(r => r.json()),
+        api('/wishes').then(r => r.json()),
+        api('/train').then(r => r.json()),
+      ]);
+      $('app').hidden = false;
+      renderSummary(summary);
+      renderTrain(train);
+      renderAlerts(wishes);
+      renderShopping(wishes);
+      renderWishes(wishes);
+    } catch (e) { if (e.message !== 'login') console.error(e); }
+  }
+
+  function renderSummary(s) {
+    $('wishCount').textContent = s.wishes;
+    $('spend').textContent = '$' + Number(s.claudeSpendUsd).toFixed(2);
+    $('childActions').innerHTML = s.children.map(c =>
+      `<button class="btn secondary" data-extra="${esc(c.id)}">Extra wish today for ${esc(c.name)}</button>`).join('');
+  }
+
+  function renderTrain(t) {
+    const s = t.state;
+    if (!t.mqttConnected) { $('trainStatus').innerHTML = '<span class="pill bad">MQTT offline</span>'; return; }
+    if (!s) { $('trainStatus').innerHTML = '<span class="pill bad">Signal box not seen yet</span>'; return; }
+    const battery = s.batteryPercent == null ? '?' : s.batteryPercent + '%';
+    $('trainStatus').innerHTML =
+      `<span class="pill ${t.online ? 'ok' : 'bad'}">${t.online ? 'Online' : 'Offline'}</span> ` +
+      `<span class="pill">Battery ${esc(battery)}</span> <span class="pill">${s.busy ? 'On a run' : 'Waiting'}</span>` +
+      `<div class="muted" style="margin-top:6px">Train: ${esc(s.trainMode)} · Track: ${esc(s.tracksideMode)}</div>`;
+  }
+
+  function renderAlerts(wishes) {
+    const flagged = wishes.filter(w => w.reading?.parentHeadsUp);
+    $('alerts').innerHTML = flagged.map(w =>
+      `<div class="alert"><strong>${esc(w.childName)}, ${day(w.day)}</strong>${esc(w.reading.parentHeadsUp)}</div>`).join('');
+  }
+
+  function renderShopping(wishes) {
+    const rows = [];
+    for (const w of wishes) (w.reading?.giftIdeas || []).forEach((g, i) => rows.push({ w, g, i }));
+    if (!rows.length) { $('shopping').textContent = 'Gift ideas will appear here.'; return; }
+    $('shopping').innerHTML = '<ul class="gifts">' + rows.map(({ w, g, i }) =>
+      `<li><label><input type="checkbox" data-wish="${w.id}" data-gift="${i}" ${w.bought[i] ? 'checked' : ''}>` +
+      `<span>${esc(g.item)} · ${esc(w.childName)}${g.forSomeoneElse ? ' (for someone else)' : ''}</span></label></li>`).join('') + '</ul>';
+  }
+
+  function renderWishes(wishes) {
+    $('wishes').innerHTML = wishes.map(w => `
+      <article class="wish">
+        <div>
+          <div class="meta">${esc(w.childName)} · ${day(w.day)} · ${esc(w.status)}${w.byReindeer ? ' · delivered by Rudolph' : ''}
+            ${w.reading ? `<span class="pill mood">${esc(w.reading.mood)}</span>` : ''}</div>
+          <p class="text">“${esc(w.text)}”</p>
+          ${w.reading ? `<p class="muted">${esc(w.reading.parentSummary)}</p>
+            <p class="reply">${esc(w.reading.santaReply)}</p>
+            ${w.reading.drawingDescription ? `<p class="muted">Drawing: ${esc(w.reading.drawingDescription)}</p>` : ''}` : ''}
+          <div class="meta">${esc(w.brain || '')}${w.costUsd != null ? ' · $' + Number(w.costUsd).toFixed(4) : ''}</div>
+          ${w.hasVoice ? `<div class="actions"><button class="btn secondary" data-replay="${w.id}">Play Santa on the station speaker</button></div>` : ''}
+        </div>
+        ${w.hasPhoto ? `<img src="/api/elves/wishes/${w.id}/photo" alt="Drawing from ${esc(w.childName)}" loading="lazy">` : '<span></span>'}
+      </article>`).join('') || '<p class="muted">No letters yet. Print the QR cards and wait for the first wish!</p>';
+  }
+
+  document.addEventListener('click', async e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    try {
+      if (b.dataset.cmd) { await api('/train/' + b.dataset.cmd, { method: 'POST' }); setTimeout(refresh, 800); }
+      if (b.dataset.replay) await api(`/wishes/${b.dataset.replay}/replay`, { method: 'POST' });
+      if (b.dataset.extra) { await api(`/children/${b.dataset.extra}/extra-wish`, { method: 'POST' }); b.textContent = 'Granted!'; }
+    } catch (err) { if (err.message !== 'login') console.error(err); }
+  });
+
+  document.addEventListener('change', async e => {
+    const box = e.target;
+    if (!box.dataset.wish) return;
+    await api(`/wishes/${box.dataset.wish}/gifts/${box.dataset.gift}`, { method: 'POST', body: JSON.stringify({ bought: box.checked }) });
+  });
+
+  refresh();
+  setInterval(() => { if (!$('app').hidden) refresh(); }, 10000);
+})();
+</script>
+</body>
+</html>

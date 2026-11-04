@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>QR cards and LEGO plans</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/css/site.css">
+</head>
+<body class="elves">
+  <header class="top">
+    <h1>QR cards &amp; LEGO plans</h1>
+    <nav><a href="/elves.html">Workshop</a> <a href="#" id="print">Print</a></nav>
+  </header>
+
+  <main class="page">
+    <p class="muted no-print">Print a card for each child, or build the code from LEGO: black 1×N tiles on a white 32×32 baseplate
+      (LEGO Classic 11026). Both scan the same. Test each one with a phone camera before it goes under the tree.</p>
+    <p id="needLogin" class="muted" hidden>Please <a href="/elves.html">log in to the workshop</a> first.</p>
+    <div id="cards" class="cards"></div>
+  </main>
+
+<script>
+(async () => {
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  document.getElementById('print').addEventListener('click', e => { e.preventDefault(); print(); });
+
+  async function load() {
+    const res = await fetch('/api/elves/cards');
+    if (res.status === 401) { document.getElementById('needLogin').hidden = false; return; }
+    render(await res.json());
+  }
+
+  // Lost card: a new code stops the old card (and its LEGO mosaic) working, so ask first.
+  document.addEventListener('click', async e => {
+    const b = e.target.closest('button[data-new-code]');
+    if (!b) return;
+    if (!confirm(`Make a new code for ${b.dataset.name}? The old card and LEGO mosaic will stop working.`)) return;
+    b.disabled = true;
+    const res = await fetch(`/api/elves/children/${encodeURIComponent(b.dataset.newCode)}/new-code`, { method: 'POST' });
+    if (res.status === 401) { document.getElementById('needLogin').hidden = false; return; }
+    if (!res.ok) { b.disabled = false; b.nextElementSibling.textContent = 'That didn\'t work. Try again.'; return; }
+    await load();
+    const note = document.querySelector(`[data-new-code="${CSS.escape(b.dataset.newCode)}"]`)?.nextElementSibling;
+    if (note) note.textContent = 'New code made. Print this card; the old one no longer works.';
+  });
+
+  function render(cards) {
+    document.getElementById('cards').innerHTML = cards.map(c => `
+    <section class="qr-card">
+      <div>
+        <div class="ticket">
+          <h2>${esc(c.name)}'s wish card</h2>
+          ${c.qrSvg}
+          <p>Scan me every day to send<br>Santa your wish!</p>
+          <p class="url">${esc(c.url)}</p>
+        </div>
+        <div class="actions no-print">
+          <button class="btn secondary" data-new-code="${esc(c.childId)}" data-name="${esc(c.name)}">Lost this card? Make a new code</button>
+          <p class="muted" role="status" style="margin:0;flex-basis:100%"></p>
+        </div>
+      </div>
+      <div class="lego">
+        <h3 style="margin:0 0 6px">Build it from LEGO</h3>
+        <p class="muted">QR version ${c.version}: ${c.lego.codeModules}×${c.lego.codeModules} studs, centred on a ${c.lego.baseplate}×${c.lego.baseplate} baseplate
+          (start ${c.lego.offset + 1} studs in from the top-left). Numbers on the tiles are their lengths. ${c.lego.tileCount} tiles in total.</p>
+        ${c.lego.svg}
+        <table class="parts">
+          <tr><th>Part</th><th>Design ID</th><th>Qty</th></tr>
+          ${c.lego.parts.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.designId)}</td><td>${p.count}</td></tr>`).join('')}
+          <tr><td>Baseplate 32 x 32, white</td><td>3811</td><td>1</td></tr>
+        </table>
+      </div>
+    </section>`).join('');
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>
