@@ -10,6 +10,7 @@ namespace NorthPole.SignalBox;
 ///   NorthPole.SignalBox bench signal                 red, green, four swaps, off
 ///   NorthPole.SignalBox bench signal red|green|off [seconds]
 ///   NorthPole.SignalBox bench wait [seconds]         count magnet passes at the North Pole, signal green on each
+///   NorthPole.SignalBox bench distance [seconds]     live readings from the mailbox HC-SR04
 /// It always uses the real GPIO, whatever Trackside:Mode says, and opens only the pins its command needs.
 /// </summary>
 public static class Bench
@@ -42,6 +43,7 @@ public static class Bench
             {
                 "signal" => await SignalAsync(args[1..], options, loggers, log, stop.Token),
                 "wait" => await WaitAsync(args[1..], options, loggers, log, stop.Token),
+                "distance" => await DistanceAsync(args[1..], options, log, stop.Token),
                 _ => Usage(log),
             };
         }
@@ -66,7 +68,7 @@ public static class Bench
 
     static int Usage(ILogger log)
     {
-        log.LogInformation("Usage: NorthPole.SignalBox bench signal [red|green|off] [seconds] | bench wait [seconds]");
+        log.LogInformation("Usage: NorthPole.SignalBox bench signal [red|green|off] [seconds] | bench wait [seconds] | bench distance [seconds]");
         return 2;
     }
 
@@ -158,6 +160,59 @@ public static class Bench
         else
             log.LogInformation("Done: {Passes} pass(es) in {Seconds} s", passes, seconds);
         return passes > 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// The mailbox HC-SR04 on its own, through the same UltrasonicSensor the mail run uses: four readings a second, each
+    /// marked when it's close enough to count as the train (Trackside:HomeSensor:DetectWithinCm), then a summary.
+    /// </summary>
+    static async Task<int> DistanceAsync(string[] args, SignalBoxOptions options, ILogger log, CancellationToken ct)
+    {
+        var seconds = args.Length > 0 ? Seconds(args[0]) : 30;
+        var o = options.Trackside.HomeSensor;
+        if (o.Kind != SensorKind.Ultrasonic)
+            throw new ArgumentException($"The mailbox sensor is set to {o.Kind}, not Ultrasonic (Trackside:HomeSensor:Kind)");
+        using var gpio = PiGpio.Open();
+        var sensor = new UltrasonicSensor(gpio, o);
+        using var window = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        window.CancelAfter(TimeSpan.FromSeconds(seconds));
+
+        log.LogInformation("Mailbox HC-SR04, Trig on GPIO{Trig} and Echo on GPIO{Echo}: readings for {Seconds} s. Closer than {Near} cm counts as the train",
+            o.TriggerPin, o.Pin, seconds, o.DetectWithinCm);
+        int readings = 0, near = 0, silent = 0;
+        double min = double.MaxValue, max = 0;
+        try
+        {
+            while (true)
+            {
+                if (sensor.MeasureCm() is { } cm)
+                {
+                    readings++;
+                    min = Math.Min(min, cm);
+                    max = Math.Max(max, cm);
+                    if (cm < o.DetectWithinCm) near++;
+                    log.LogInformation(cm < o.DetectWithinCm ? "{Cm,6:0.0} cm   train" : "{Cm,6:0.0} cm", cm);
+                }
+                else
+                {
+                    silent++;
+                    log.LogInformation("    no echo");
+                }
+                await Task.Delay(TimeSpan.FromMilliseconds(250), window.Token);
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // The window ended.
+        }
+        if (readings == 0)
+        {
+            log.LogWarning("No echo at all in {Seconds} s. Check the Trig wire, the Echo divider, and the sensor's 5 V and ground", seconds);
+            return 1;
+        }
+        log.LogInformation("Done: {Readings} readings from {Min:0.0} to {Max:0.0} cm, {Near} close enough to count as the train, {Silent} with no echo",
+            readings, min, max, near, silent);
+        return 0;
     }
 
     /// <summary>The real GPIO trackside, with only the signal and the North Pole sensor: the mailbox sensor and the servo stay closed.</summary>
