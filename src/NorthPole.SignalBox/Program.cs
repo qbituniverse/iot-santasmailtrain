@@ -2,6 +2,13 @@ using NorthPole.Contracts;
 using NorthPole.Messaging;
 using NorthPole.SignalBox;
 
+// "bench ..." tests one trackside part at a time instead of starting the signal box (see Bench.cs).
+if (args.Length > 0 && args[0] == "bench")
+{
+    Environment.ExitCode = await Bench.RunAsync(args[1..]);
+    return;
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.Configure<SignalBoxOptions>(builder.Configuration.GetSection("SignalBox"));

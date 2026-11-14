@@ -35,7 +35,7 @@ public sealed class GpioTrackside : ITrackside
 {
     readonly TracksideOptions _o;
     readonly ILogger<GpioTrackside> _log;
-    readonly GpioController _gpio = new();
+    readonly GpioController _gpio = PiGpio.Open();
     readonly PwmChannel? _servo;
     readonly IStationSensor _northPole;
     readonly IStationSensor? _home;

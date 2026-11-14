@@ -203,7 +203,7 @@ public sealed class LcdBoardDisplay : IBoardDisplay
     readonly CharacterLcd _lcd;
     string _top = "", _bottom = "";
 
-    public LcdBoardDisplay(IOptions<SignalBoxOptions> options) : this(options, new GpioController()) { }
+    public LcdBoardDisplay(IOptions<SignalBoxOptions> options) : this(options, PiGpio.Open()) { }
 
     public LcdBoardDisplay(IOptions<SignalBoxOptions> options, GpioController gpio)
     {
