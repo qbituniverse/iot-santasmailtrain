@@ -192,6 +192,8 @@ Then, on the Pi:
 ~/northpole-bench/NorthPole.SignalBox bench distance 30        # live readings from the mailbox HC-SR04
 ~/northpole-bench/NorthPole.SignalBox bench flag               # the mailbox flag: down, up, down, up, down
 ~/northpole-bench/NorthPole.SignalBox bench flag duty 0.06     # hold any position, to tune FlagUpDuty and FlagDownDuty
+~/northpole-bench/NorthPole.SignalBox bench board              # a pretend mail run on the station board, screen by screen
+~/northpole-bench/NorthPole.SignalBox bench board text "Hello" # any two lines
 ~/northpole-bench/NorthPole.SignalBox bench train              # the locomotive over Bluetooth: battery, headlights, a slow nudge
 ~/northpole-bench/NorthPole.SignalBox bench train power 30 3   # hold one motor power for 3 s, then brake
 ```
