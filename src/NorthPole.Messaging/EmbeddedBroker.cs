@@ -13,7 +13,7 @@ public sealed class EmbeddedBrokerOptions
 }
 
 /// <summary>
-/// A tiny MQTT broker inside the HQ process, so the Pi 5 doesn't need Mosquitto.
+/// A tiny MQTT broker inside the HQ process, so the Pi doesn't need Mosquitto.
 /// Anything on your LAN (the signal box, a Unity digital twin, MQTT Explorer) can connect to port 1883.
 /// Switch it off and run Mosquitto instead if you want authentication or persistence.
 /// </summary>

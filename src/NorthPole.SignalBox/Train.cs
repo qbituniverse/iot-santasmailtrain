@@ -127,7 +127,7 @@ public sealed class PoweredUpTrain(IOptions<SignalBoxOptions> options, ILoggerFa
 }
 
 /// <summary>
-/// The same hub through Linux's own Bluetooth stack (BlueZ, over D-Bus with Linux.Bluetooth), so the Pi 4's built-in
+/// The same hub through Linux's own Bluetooth stack (BlueZ, over D-Bus with Linux.Bluetooth), so the Pi's built-in
 /// radio or any standard USB Bluetooth adapter will do: no BLED112 needed. It speaks the LEGO Wireless Protocol itself,
 /// sending the same bytes SharpBrick sends in <see cref="PoweredUpTrain"/> (see <see cref="LegoWireless"/>).
 /// </summary>

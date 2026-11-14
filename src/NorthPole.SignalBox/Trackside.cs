@@ -26,9 +26,10 @@ public interface ITrackside : IDisposable
 }
 
 /// <summary>
-/// Real hardware on the Pi 4 GPIO header (BCM numbering):
+/// Real hardware on the Pi's GPIO header (BCM numbering, the same on a Pi 4 and a Pi 5):
 ///   North Pole magnetic contact → GPIO17, mailbox HC-SR04 Trig → GPIO22 and Echo → GPIO27 (through a divider),
-///   red LED → GPIO23, green LED → GPIO24, SG90 servo signal → GPIO18 (hardware PWM0).
+///   red LED → GPIO23, green LED → GPIO24, SG90 servo signal → GPIO18 (hardware PWM).
+/// On a Pi 5 the GPIO goes through libgpiod (the RP1 chip), so libgpiod must be installed.
 /// </summary>
 public sealed class GpioTrackside : ITrackside
 {
@@ -54,8 +55,10 @@ public sealed class GpioTrackside : ITrackside
         {
             try
             {
-                _servo = PwmChannel.Create(_o.ServoPwmChip, _o.ServoPwmChannel, 50, _o.FlagDownDuty);
+                var (chip, channel) = ServoPwm.Locate(_o);
+                _servo = PwmChannel.Create(chip, channel, 50, _o.FlagDownDuty);
                 _servo.Start();
+                _log.LogInformation("Mailbox flag servo on pwmchip{Chip} channel {Channel}", chip, channel);
             }
             catch (Exception ex)
             {
@@ -94,6 +97,37 @@ public sealed class GpioTrackside : ITrackside
         _servo?.Dispose();
         _gpio.Dispose();
     }
+}
+
+/// <summary>
+/// Finds the hardware PWM channel behind GPIO18. The same overlay (dtoverlay=pwm,pin=18,func=2) works on both boards,
+/// but the channel doesn't: on a Pi 4 GPIO18 is channel 0 of pwmchip0; on a Pi 5 it is channel 2 of the RP1 PWM block,
+/// device 1f00098000.pwm, whose pwmchip number changed between kernels (pwmchip2 on 6.6, pwmchip0 on 6.12). So on a
+/// Pi 5 the chip is found by its device link. Settings of 0 or more override either number.
+/// </summary>
+public static class ServoPwm
+{
+    const string Rp1PwmBlock = "1f00098000.pwm"; // RP1's PWM0; its sibling 1f0009c000.pwm drives the cooling fan
+
+    /// <param name="root">The filesystem root, for tests.</param>
+    /// <param name="deviceLink">Reads a pwmchip's "device" symlink target, for tests.</param>
+    public static (int Chip, int Channel) Locate(TracksideOptions o, string root = "/", Func<string, string?>? deviceLink = null)
+    {
+        if (o.ServoPwmChip >= 0 && o.ServoPwmChannel >= 0) return (o.ServoPwmChip, o.ServoPwmChannel);
+        deviceLink ??= chipDir => new FileInfo(Path.Combine(chipDir, "device")).LinkTarget;
+
+        var model = Path.Combine(root, "proc", "device-tree", "model");
+        if (!File.Exists(model) || !File.ReadAllText(model).Contains("Raspberry Pi 5"))
+            return (Pick(o.ServoPwmChip, 0), Pick(o.ServoPwmChannel, 0));
+
+        var pwm = Path.Combine(root, "sys", "class", "pwm");
+        var chip = (Directory.Exists(pwm) ? Directory.GetDirectories(pwm, "pwmchip*") : [])
+            .FirstOrDefault(dir => Path.GetFileName(deviceLink(dir)?.TrimEnd('/')) == Rp1PwmBlock)
+            ?? throw new InvalidOperationException("No RP1 PWM block on this Pi 5: is dtoverlay=pwm,pin=18,func=2 in config.txt?");
+        return (Pick(o.ServoPwmChip, int.Parse(Path.GetFileName(chip)["pwmchip".Length..])), Pick(o.ServoPwmChannel, 2));
+    }
+
+    static int Pick(int setting, int found) => setting >= 0 ? setting : found;
 }
 
 /// <summary>One station's way of noticing the train.</summary>

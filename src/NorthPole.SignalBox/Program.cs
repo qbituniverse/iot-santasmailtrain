@@ -12,7 +12,7 @@ builder.Services.AddNorthPoleMessaging(link =>
     link.Host = options.Mqtt.Host;
     link.Port = options.Mqtt.Port;
     link.ClientId = options.Mqtt.ClientId;
-    // If the Pi 4 loses power, the broker tells everyone the train is offline.
+    // If the signal box stops or loses power, the broker tells everyone the train is offline.
     link.WillTopic = Topics.TrainState;
     link.WillPayload = NorthPoleJson.Serialize(new TrainState(false, null, 0, false, "Offline", "Offline", DateTimeOffset.Now));
 });

@@ -64,7 +64,7 @@ public sealed class VoiceOptions
     /// <summary>&gt; 1 speaks slower. Santa is never in a hurry.</summary>
     public double LengthScale { get; set; } = 1.15;
 
-    /// <summary>Play Santa out loud at the North Pole station (the Pi 5's speaker).</summary>
+    /// <summary>Play Santa out loud at the North Pole station (the Pi's speaker).</summary>
     public bool PlayOnStation { get; set; } = true;
 
     /// <summary>Command used to play a WAV file; the file path is appended.</summary>

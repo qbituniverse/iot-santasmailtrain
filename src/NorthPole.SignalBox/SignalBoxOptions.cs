@@ -10,7 +10,7 @@ public sealed class SignalBoxOptions
 
 public sealed class MqttOptions
 {
-    /// <summary>The Pi 5 runs an embedded broker by default, so point this at it (e.g. "np.local").</summary>
+    /// <summary>HQ runs an embedded broker: "localhost" when both apps share one Pi, HQ's name (e.g. "np.local") when split.</summary>
     public string Host { get; set; } = "localhost";
     public int Port { get; set; } = 1883;
     public string ClientId { get; set; } = "signalbox";
@@ -61,10 +61,13 @@ public sealed class TracksideOptions
     public int RedLedPin { get; set; } = 23;
     public int GreenLedPin { get; set; } = 24;
 
-    /// <summary>Hardware PWM for the SG90 mailbox-flag servo. Needs dtoverlay=pwm,pin=18,func=2 on the Pi 4.</summary>
+    /// <summary>
+    /// Hardware PWM on GPIO18 for the SG90 mailbox-flag servo. Needs dtoverlay=pwm,pin=18,func=2 in config.txt.
+    /// Chip and channel -1 find it by board: pwmchip0 channel 0 on a Pi 4, the RP1 block's channel 2 on a Pi 5.
+    /// </summary>
     public bool ServoEnabled { get; set; } = true;
-    public int ServoPwmChip { get; set; } = 0;
-    public int ServoPwmChannel { get; set; } = 0;
+    public int ServoPwmChip { get; set; } = -1;
+    public int ServoPwmChannel { get; set; } = -1;
 
     /// <summary>50 Hz servo: 5% duty ≈ 1 ms ≈ 0°, 7.5% ≈ 1.5 ms ≈ 90°. Tune to your flag.</summary>
     public double FlagDownDuty { get; set; } = 0.05;

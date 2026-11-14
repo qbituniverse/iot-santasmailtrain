@@ -1,6 +1,6 @@
 #!/bin/bash
 # Optional: Santa speaks through an Amazon Echo (or any Bluetooth speaker) instead of a USB speaker.
-# Run on the Pi 5 as the normal user, from this folder, after setup.sh:
+# Run on the Pi as the normal user, from this folder, after setup.sh:
 #   1. Say "Alexa, pair Bluetooth", then:   bash echo-speaker.sh                     (lists the speakers it can see)
 #   2. Pair it and switch Santa over:       bash echo-speaker.sh AA:BB:CC:DD:EE:FF
 # Assumes Raspberry Pi OS Lite. The desktop edition's PipeWire already handles Bluetooth audio and would clash.

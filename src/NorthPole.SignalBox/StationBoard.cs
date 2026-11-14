@@ -196,7 +196,7 @@ public sealed class StationBoardService(StationBoard board, ITrain train, MqttLi
     }
 }
 
-/// <summary>The JHD162A on the Pi 4, with an envelope, the train and a Christmas tree in its custom characters.</summary>
+/// <summary>The JHD162A on the Pi's GPIO, with an envelope, the train and a Christmas tree in its custom characters.</summary>
 public sealed class LcdBoardDisplay : IBoardDisplay
 {
     readonly GpioController _gpio;
