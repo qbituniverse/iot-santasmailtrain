@@ -26,16 +26,32 @@ public sealed class FamilyService
         var dir = Path.GetFullPath(_o.DataDirectory);
         Directory.CreateDirectory(dir);
         _file = Path.Combine(dir, "family.json");
-        _state = File.Exists(_file)
-            ? JsonSerializer.Deserialize<FamilyState>(File.ReadAllText(_file), NorthPoleJson.Options) ?? new()
-            : new();
+        _state = File.Exists(_file) ? Load(_file) : new();
 
+        // Only write when something changed: HQ starts after every power cut, and an untouched file can't be damaged.
+        var changed = !File.Exists(_file);
         foreach (var child in _o.Family.Where(c => !_state.Codes.ContainsKey(c.Id)))
         {
             _state.Codes[child.Id] = NewCode();
             log.LogInformation("New QR code for {Child}: {Code}", child.Name, _state.Codes[child.Id]);
+            changed = true;
         }
-        Save();
+        if (changed) Save();
+    }
+
+    /// <summary>A damaged file stops HQ rather than quietly starting afresh, which would give every card a new code.</summary>
+    static FamilyState Load(string file)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<FamilyState>(File.ReadAllText(file), NorthPoleJson.Options) ?? new();
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException(
+                $"{file} is damaged, so the children's card codes can't be read. Restore it from a backup; deleting it " +
+                "would give every child a new code, and the printed cards and LEGO mosaics would stop working.", ex);
+        }
     }
 
     public IReadOnlyList<ChildOptions> Children => _o.Family;
@@ -98,7 +114,13 @@ public sealed class FamilyService
         return code;
     }
 
-    void Save() => File.WriteAllText(_file, JsonSerializer.Serialize(_state, NorthPoleJson.Options));
+    /// <summary>Write a new file, then swap it in, so a power cut leaves either the old file or the new one, never half of one.</summary>
+    void Save()
+    {
+        var tmp = _file + ".tmp";
+        File.WriteAllText(tmp, JsonSerializer.Serialize(_state, NorthPoleJson.Options));
+        File.Move(tmp, _file, overwrite: true);
+    }
 
     sealed class FamilyState
     {

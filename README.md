@@ -345,6 +345,7 @@ Set `Santa:Language` (for example, "Polish"), download a matching [Piper voice](
 - Each morning, park the train at the mailbox and press its green button. Swap the six AAA batteries when the dashboard shows them low.
 - The dashboard (`http://np.local/elves`) has the train's status, **Test run**, **Stop** and the lights; each child's **Extra wish today**; the shopping list; and every letter with its mood and Santa's reply. A worried or sad letter shows as an alert at the top.
 - **Lost card?** On **QR cards & LEGO plans**, click **Lost this card? Make a new code** under it. The old card and its LEGO mosaic stop working at once, and the new card is ready to print.
+- **After a power cut** everything starts by itself, and today's unfinished letters carry on. If the dashboard shows the train Offline, press its green button, and make sure it's back at the mailbox before the next letter. For a planned shutdown, use `sudo poweroff` rather than pulling the plug.
 
 ## Safety
 
@@ -379,6 +380,7 @@ The MQTT broker has **no authentication**. Anyone on the same network could ask 
 | The station board is lit but blank, or shows solid blocks | Contrast, or the LCD was never started. | Turn the trimmer. If the top row stays solid, check RS, E and D4 to D7, and that the signal box is running. |
 | The signal box waits for the MQTT broker | HQ isn't running, or, split across two Pis, can't be reached. | `systemctl status northpole-hq`. Split: check `Mqtt:Host` in the signal box's `appsettings.Pi.json`. |
 | An app won't start after a settings change | A JSON mistake. | `python3 -m json.tool` on the file shows where. |
+| HQ won't start: "family.json is damaged" | The file holding the card codes is broken. | Restore `data/family.json` from a backup. Don't delete it: every child would get a new code, and the printed cards and LEGO mosaics would stop working. |
 
 ## Making it your own
 
