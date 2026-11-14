@@ -152,7 +152,7 @@ public sealed class BlueZTrain(IOptions<SignalBoxOptions> options, ILogger<BlueZ
 
         var device = await FindHubAsync(adapter, ct);
         var timeout = TimeSpan.FromSeconds(15);
-        await device.ConnectAsync();
+        await ConnectWithRetryAsync(device, ct);
         await device.WaitForPropertyValueAsync("Connected", true, timeout);
         await device.WaitForPropertyValueAsync("ServicesResolved", true, timeout);
 
@@ -167,6 +167,27 @@ public sealed class BlueZTrain(IOptions<SignalBoxOptions> options, ILogger<BlueZ
 
         await RefreshBatteryAsync(ct);
         log.LogInformation("Connected to hub {Name}, battery {Battery}%", await device.GetAliasAsync(), BatteryPercent);
+    }
+
+    /// <summary>
+    /// BlueZ often drops the first LE connection to a hub it has only just seen (le-connection-abort-by-local), while an
+    /// attempt a moment later goes through. So try three times, a second apart, before giving the hub up.
+    /// </summary>
+    async Task ConnectWithRetryAsync(BlueZDevice device, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await device.ConnectAsync();
+                return;
+            }
+            catch (Exception ex) when (attempt < 3 && !ct.IsCancellationRequested)
+            {
+                log.LogInformation("Bluetooth connection attempt {Attempt} failed ({Problem}), trying again", attempt, ex.Message);
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            }
+        }
     }
 
     /// <summary>Scans for an advertising LEGO two-port hub; 60 s, then the signal box tries again.</summary>

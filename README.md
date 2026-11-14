@@ -192,9 +192,11 @@ Then, on the Pi:
 ~/northpole-bench/NorthPole.SignalBox bench distance 30        # live readings from the mailbox HC-SR04
 ~/northpole-bench/NorthPole.SignalBox bench flag               # the mailbox flag: down, up, down, up, down
 ~/northpole-bench/NorthPole.SignalBox bench flag duty 0.06     # hold any position, to tune FlagUpDuty and FlagDownDuty
+~/northpole-bench/NorthPole.SignalBox bench train              # the locomotive over Bluetooth: battery, headlights, a slow nudge
+~/northpole-bench/NorthPole.SignalBox bench train power 30 3   # hold one motor power for 3 s, then brake
 ```
 
-Your user needs to be in the `gpio` group, as the first user on Raspberry Pi OS is. The installed copy works the same way: `/opt/northpole/signalbox/NorthPole.SignalBox bench …`.
+For the train, press the hub's green button so its light flashes, and keep the LEGO remote switched off: the hub takes one connection at a time. Your user needs to be in the `gpio` group, as the first user on Raspberry Pi OS is. The installed copy works the same way: `/opt/northpole/signalbox/NorthPole.SignalBox bench …`.
 
 ## Configuration
 
