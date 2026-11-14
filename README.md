@@ -175,6 +175,24 @@ An optional 16x2 LCD by the mailbox, like a departure board. Anyone in the room 
 
 The envelope, train and tree are the LCD's custom characters. Its character set is plain ASCII, so accents come off (Zoë shows as Zoe). Keep its wires under about 50 cm. To run without a board, set `Trackside:Board:Enabled` to `false`.
 
+### Testing one part at a time
+
+The signal box has a bench mode that drives one part at a time through the same code as a mail run, and opens only the pins that test needs. Wire a part, try it, then add the next. Run it on the Pi with the signal box service stopped (`sudo systemctl stop northpole-signalbox`), or before you install anything: from Windows, `deploy/bench.ps1` builds a self-contained copy and puts it in `~/northpole-bench` on the Pi, with no WSL needed.
+
+```powershell
+.\deploy\bench.ps1 -PiHost you@np.local
+```
+
+Then, on the Pi:
+
+```bash
+~/northpole-bench/NorthPole.SignalBox bench signal             # red 3 s, green 3 s, four swaps, then off
+~/northpole-bench/NorthPole.SignalBox bench signal green 10    # hold one aspect
+~/northpole-bench/NorthPole.SignalBox bench wait 30            # count magnet passes at the North Pole contact
+```
+
+Your user needs to be in the `gpio` group, as the first user on Raspberry Pi OS is. The installed copy works the same way: `/opt/northpole/signalbox/NorthPole.SignalBox bench …`.
+
 ## Configuration
 
 Each app reads JSON settings files next to it, then environment variables, and **the later source wins**:
