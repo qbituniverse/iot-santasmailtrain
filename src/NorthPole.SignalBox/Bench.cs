@@ -11,6 +11,9 @@ namespace NorthPole.SignalBox;
 ///   NorthPole.SignalBox bench signal red|green|off [seconds]
 ///   NorthPole.SignalBox bench wait [seconds]         count magnet passes at the North Pole, signal green on each
 ///   NorthPole.SignalBox bench distance [seconds]     live readings from the mailbox HC-SR04
+///   NorthPole.SignalBox bench flag                   the mailbox flag: down, up, down, up, down
+///   NorthPole.SignalBox bench flag up|down [seconds]
+///   NorthPole.SignalBox bench flag duty 0.06 [seconds]   any position, to tune FlagUpDuty and FlagDownDuty
 /// It always uses the real GPIO, whatever Trackside:Mode says, and opens only the pins its command needs.
 /// </summary>
 public static class Bench
@@ -26,17 +29,19 @@ public static class Bench
             .Build();
         var options = config.GetSection("SignalBox").Get<SignalBoxOptions>() ?? new();
 
-        using var loggers = LoggerFactory.Create(b => b
-            .AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; })
-            .SetMinimumLevel(LogLevel.Information)
+        var command = args.Length > 0 ? args[0].ToLowerInvariant() : "";
+        using var loggers = LoggerFactory.Create(b =>
+        {
+            b.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; })
+             .SetMinimumLevel(LogLevel.Information);
             // The trackside logs every detection; while a magnet is held that would repeat. The bench reports passes itself.
-            .AddFilter(typeof(GpioTrackside).FullName, LogLevel.Warning));
+            if (command == "wait") b.AddFilter(typeof(GpioTrackside).FullName, LogLevel.Warning);
+        });
         var log = loggers.CreateLogger("Bench");
 
         using var stop = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
 
-        var command = args.Length > 0 ? args[0].ToLowerInvariant() : "";
         try
         {
             return command switch
@@ -44,6 +49,7 @@ public static class Bench
                 "signal" => await SignalAsync(args[1..], options, loggers, log, stop.Token),
                 "wait" => await WaitAsync(args[1..], options, loggers, log, stop.Token),
                 "distance" => await DistanceAsync(args[1..], options, log, stop.Token),
+                "flag" => await FlagAsync(args[1..], options, loggers, log, stop.Token),
                 _ => Usage(log),
             };
         }
@@ -68,7 +74,7 @@ public static class Bench
 
     static int Usage(ILogger log)
     {
-        log.LogInformation("Usage: NorthPole.SignalBox bench signal [red|green|off] [seconds] | bench wait [seconds] | bench distance [seconds]");
+        log.LogInformation("Usage: NorthPole.SignalBox bench signal [red|green|off] [seconds] | bench wait [seconds] | bench distance [seconds] | bench flag [up|down [seconds] | duty 0.06 [seconds]]");
         return 2;
     }
 
@@ -215,11 +221,79 @@ public static class Bench
         return 0;
     }
 
-    /// <summary>The real GPIO trackside, with only the signal and the North Pole sensor: the mailbox sensor and the servo stay closed.</summary>
-    static GpioTrackside Open(SignalBoxOptions options, ILoggerFactory loggers)
+    /// <summary>
+    /// The mailbox flag's SG90 on GPIO18's hardware PWM, moved by GpioTrackside.SetFlag as on a mail run: a short show of
+    /// down and up, one position held, or any duty cycle held, to find the right FlagUpDuty and FlagDownDuty.
+    /// Each ends with the flag down.
+    /// </summary>
+    static async Task<int> FlagAsync(string[] args, SignalBoxOptions options, ILoggerFactory loggers, ILogger log, CancellationToken ct)
+    {
+        var o = options.Trackside;
+        var mode = args.Length > 0 ? args[0].ToLowerInvariant() : "show";
+        double? duty = null;
+        var seconds = 3.0;
+        switch (mode)
+        {
+            case "show":
+                break;
+            case "up" or "down":
+                seconds = args.Length > 1 ? Seconds(args[1]) : seconds;
+                break;
+            case "duty":
+                duty = args.Length > 1 ? Duty(args[1]) : throw new ArgumentException("Give a duty cycle to hold, for example: bench flag duty 0.06");
+                seconds = args.Length > 2 ? Seconds(args[2]) : seconds;
+                break;
+            default:
+                throw new ArgumentException($"Unknown flag command '{args[0]}': use up, down or duty");
+        }
+
+        using var track = Open(options, loggers, servo: true);
+        if (!track.HasFlag)
+        {
+            log.LogError("No PWM for the flag servo. Add 'dtoverlay=pwm,pin=18,func=2' to /boot/firmware/config.txt and reboot");
+            return 1;
+        }
+        log.LogInformation("Flag servo on GPIO18: down is duty {Down:0.000} ({DownMs:0.00} ms), up is {Up:0.000} ({UpMs:0.00} ms)",
+            o.FlagDownDuty, o.FlagDownDuty * 20, o.FlagUpDuty, o.FlagUpDuty * 20);
+
+        async Task Move(bool up, double hold, string what)
+        {
+            log.LogInformation("{What}", what);
+            track.SetFlag(up);
+            await Task.Delay(TimeSpan.FromSeconds(hold), ct);
+        }
+
+        var upDuty = o.FlagUpDuty;
+        if (mode == "show")
+        {
+            await Move(false, 1.5, "Flag down");
+            await Move(true, 2, "Flag up");
+            await Move(false, 2, "Flag down");
+            await Move(true, 2, "Flag up");
+        }
+        else if (duty is { } d)
+        {
+            // SetFlag(true) moves to FlagUpDuty, so borrow it for the duty being tried.
+            o.FlagUpDuty = d;
+            await Move(true, seconds, $"Holding duty {d:0.000} ({d * 20:0.00} ms) for {seconds} s");
+            o.FlagUpDuty = upDuty;
+        }
+        else
+        {
+            await Move(mode == "up", seconds, $"Flag {mode} for {seconds} s");
+        }
+        await Move(false, 1, "Flag down");
+        return 0;
+    }
+
+    /// <summary>
+    /// The real GPIO trackside, with only the signal and the North Pole sensor, and the flag servo when asked for:
+    /// the mailbox sensor stays closed.
+    /// </summary>
+    static GpioTrackside Open(SignalBoxOptions options, ILoggerFactory loggers, bool servo = false)
     {
         options.Trackside.Mode = TracksideMode.Gpio;
-        options.Trackside.ServoEnabled = false;
+        options.Trackside.ServoEnabled = servo;
         options.Trackside.HomeSensor = new StationSensorOptions { Kind = SensorKind.None };
         return new GpioTrackside(Options.Create(options), loggers.CreateLogger<GpioTrackside>());
     }
@@ -228,4 +302,10 @@ public static class Bench
         double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var s) && s > 0 && s <= 600
             ? s
             : throw new ArgumentException($"'{value}' isn't a number of seconds between 0 and 600");
+
+    /// <summary>A servo duty cycle at 50 Hz, kept to 0.4 to 2.6 ms so a typo can't drive the SG90 against its end stops.</summary>
+    static double Duty(string value) =>
+        double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) && d >= 0.02 && d <= 0.13
+            ? d
+            : throw new ArgumentException($"'{value}' isn't a duty cycle between 0.02 and 0.13 (0.4 to 2.6 ms at 50 Hz)");
 }
