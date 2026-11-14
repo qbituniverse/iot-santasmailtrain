@@ -70,6 +70,9 @@ public sealed class GpioTrackside : ITrackside
     public string Mode => "Gpio";
     public bool HasHomeSensor => _home is not null;
 
+    /// <summary>False when the servo is disabled or its PWM couldn't be opened; the flag then stays where it is.</summary>
+    public bool HasFlag => _servo is not null;
+
     public async Task WaitForTrainAsync(Station station, CancellationToken ct)
     {
         var sensor = station == Station.NorthPole ? _northPole
