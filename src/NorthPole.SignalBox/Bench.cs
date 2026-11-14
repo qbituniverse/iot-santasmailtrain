@@ -14,7 +14,10 @@ namespace NorthPole.SignalBox;
 ///   NorthPole.SignalBox bench flag                   the mailbox flag: down, up, down, up, down
 ///   NorthPole.SignalBox bench flag up|down [seconds]
 ///   NorthPole.SignalBox bench flag duty 0.06 [seconds]   any position, to tune FlagUpDuty and FlagDownDuty
-/// It always uses the real GPIO, whatever Trackside:Mode says, and opens only the pins its command needs.
+///   NorthPole.SignalBox bench train                  the locomotive over Bluetooth: battery, headlights, a slow nudge
+///   NorthPole.SignalBox bench train power 30 [seconds]   one motor power held (up to MaxSpeed, 60 s at most), then brake
+/// It always uses the real hardware, whatever the Mode settings say: the GPIO, or for the train the Pi's own Bluetooth
+/// through BlueZ. It opens only what its command needs.
 /// </summary>
 public static class Bench
 {
@@ -50,6 +53,7 @@ public static class Bench
                 "wait" => await WaitAsync(args[1..], options, loggers, log, stop.Token),
                 "distance" => await DistanceAsync(args[1..], options, log, stop.Token),
                 "flag" => await FlagAsync(args[1..], options, loggers, log, stop.Token),
+                "train" => await TrainAsync(args[1..], options, loggers, log, stop.Token),
                 _ => Usage(log),
             };
         }
@@ -66,7 +70,7 @@ public static class Bench
         }
         catch (Exception ex)
         {
-            log.LogError("The bench test failed: {Problem} ({Kind}). It needs the Pi's GPIO: run it on the Pi, with the signal box service stopped",
+            log.LogError("The bench test failed: {Problem} ({Kind}). It needs the Pi's hardware: run it on the Pi, with the signal box service stopped",
                 ex.Message, ex.GetType().Name);
             return 1;
         }
@@ -74,7 +78,7 @@ public static class Bench
 
     static int Usage(ILogger log)
     {
-        log.LogInformation("Usage: NorthPole.SignalBox bench signal [red|green|off] [seconds] | bench wait [seconds] | bench distance [seconds] | bench flag [up|down [seconds] | duty 0.06 [seconds]]");
+        log.LogInformation("Usage: NorthPole.SignalBox bench signal [red|green|off] [seconds] | bench wait [seconds] | bench distance [seconds] | bench flag [up|down [seconds] | duty 0.06 [seconds]] | bench train [power 30 [seconds]]");
         return 2;
     }
 
@@ -287,6 +291,69 @@ public static class Bench
     }
 
     /// <summary>
+    /// The locomotive's hub (88009) over the Pi's own Bluetooth, through the BlueZTrain the mail run uses: connect, read
+    /// the battery, the headlights on and off, then a slow nudge forward and back at ApproachSpeed. Or one motor power
+    /// held for a few seconds, to feel out CruiseSpeed and ApproachSpeed. Either way it ends braked, lights off and
+    /// disconnected, also when stopped with Ctrl+C.
+    /// </summary>
+    static async Task<int> TrainAsync(string[] args, SignalBoxOptions options, ILoggerFactory loggers, ILogger log, CancellationToken ct)
+    {
+        var o = options.Train;
+        int? power = null;
+        var seconds = 2.0;
+        if (args.Length > 0)
+        {
+            if (!args[0].Equals("power", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException($"Unknown train command '{args[0]}': use bench train, or bench train power 30 [seconds]");
+            power = args.Length > 1 ? Power(args[1], o.MaxSpeed) : throw new ArgumentException("Give a motor power, for example: bench train power 30");
+            seconds = args.Length > 2 ? Seconds(args[2], max: 60) : seconds;
+        }
+
+        log.LogInformation("Train over Bluetooth ({Adapter}): motor on port {Motor}, headlights on port {Light}. Keep the LEGO remote switched off",
+            o.BluetoothAdapter, (char)('A' + o.MotorPort), (char)('A' + o.LightPort));
+        await using var train = new BlueZTrain(Options.Create(options), loggers.CreateLogger<BlueZTrain>());
+        try
+        {
+            await train.ConnectAsync(ct);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            log.LogWarning("No LEGO hub answered in 60 s. Press the hub's green button so its light flashes, keep the LEGO remote off, and bring the train within a few metres of the Pi");
+            return 1;
+        }
+
+        async Task Step(string what, Func<Task> act, double hold)
+        {
+            log.LogInformation("{What}", what);
+            await act();
+            await Task.Delay(TimeSpan.FromSeconds(hold), ct);
+        }
+
+        await train.RefreshBatteryAsync(ct);
+        log.LogInformation("Battery {Battery}", train.BatteryPercent is { } b ? $"{b}%" : "not reported yet");
+        if (power is { } p)
+        {
+            await Step("Headlights on", () => train.SetLightAsync(100, ct), 0.5);
+            await Step($"Motor power {p} for {seconds} s", () => train.SetPowerAsync(p, ct), seconds);
+        }
+        else
+        {
+            await Step("Headlights on", () => train.SetLightAsync(100, ct), 2);
+            await Step("Headlights off", () => train.SetLightAsync(0, ct), 1);
+            await Step("Headlights on", () => train.SetLightAsync(100, ct), 1);
+            await Step($"Forward, power {o.ApproachSpeed}, for 1 s", () => train.SetPowerAsync(o.ApproachSpeed, ct), 1);
+            await Step("Brake", () => train.BrakeAsync(ct), 1);
+            await Step($"Back, power {-o.ApproachSpeed}, for 1 s", () => train.SetPowerAsync(-o.ApproachSpeed, ct), 1);
+        }
+        await Step("Brake", () => train.BrakeAsync(ct), 0.5);
+        await Step("Headlights off", () => train.SetLightAsync(0, ct), 0.3);
+        await train.RefreshBatteryAsync(ct);
+        log.LogInformation("Done: battery {Battery}. Disconnecting; the hub's light goes back to flashing",
+            train.BatteryPercent is { } after ? $"{after}%" : "not reported");
+        return 0;
+    }
+
+    /// <summary>
     /// The real GPIO trackside, with only the signal and the North Pole sensor, and the flag servo when asked for:
     /// the mailbox sensor stays closed.
     /// </summary>
@@ -298,10 +365,16 @@ public static class Bench
         return new GpioTrackside(Options.Create(options), loggers.CreateLogger<GpioTrackside>());
     }
 
-    static double Seconds(string value) =>
-        double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var s) && s > 0 && s <= 600
+    static double Seconds(string value, double max = 600) =>
+        double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var s) && s > 0 && s <= max
             ? s
-            : throw new ArgumentException($"'{value}' isn't a number of seconds between 0 and 600");
+            : throw new ArgumentException($"'{value}' isn't a number of seconds between 0 and {max}");
+
+    /// <summary>A motor power for the train, kept within Train:MaxSpeed either way so a typo can't send it flying.</summary>
+    static int Power(string value, int max) =>
+        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var p) && p != 0 && Math.Abs(p) <= max
+            ? p
+            : throw new ArgumentException($"'{value}' isn't a motor power between -{max} and {max} (not 0; negative runs backwards)");
 
     /// <summary>A servo duty cycle at 50 Hz, kept to 0.4 to 2.6 ms so a typo can't drive the SG90 against its end stops.</summary>
     static double Duty(string value) =>
