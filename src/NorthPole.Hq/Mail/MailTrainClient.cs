@@ -7,7 +7,7 @@ namespace NorthPole.Hq.Mail;
 public sealed record TripResult(bool Arrived, string? Reason);
 
 /// <summary>
-/// HQ's side of the conversation with the signal box (Pi 4): send a letter, follow its progress,
+/// HQ's side of the conversation with the signal box: send a letter, follow its progress,
 /// and tell the train when Santa has finished so it can go home.
 /// </summary>
 public sealed class MailTrainClient

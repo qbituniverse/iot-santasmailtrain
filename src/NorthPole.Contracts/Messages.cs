@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace NorthPole.Contracts;
 
-/// <summary>MQTT topics. HQ = Raspberry Pi 5, SignalBox = Raspberry Pi 4 next to the track.</summary>
+/// <summary>MQTT topics between HQ (the web app and Santa) and the SignalBox (the train and the track).</summary>
 public static class Topics
 {
     /// <summary>HQ → SignalBox: carry this wish from the mailbox to the North Pole.</summary>

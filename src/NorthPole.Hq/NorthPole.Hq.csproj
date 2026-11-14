@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
-  <!-- Runs on the Raspberry Pi 5 at the "North Pole" station (with a speaker).
+  <!-- Runs on the Raspberry Pi 5, with a speaker at the "North Pole" station.
        Serves the kids' wish pages, prints QR cards and LEGO mosaic plans, asks Claude to write Santa's reply,
        speaks it with Piper, and tells the signal box when to run the mail train. -->
   <PropertyGroup>

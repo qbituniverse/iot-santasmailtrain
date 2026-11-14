@@ -1,12 +1,15 @@
 [Unit]
 Description=North Pole signal box (LEGO train + trackside GPIO)
-After=network-online.target bluetooth.target
+# HQ's MQTT broker usually runs on this same Pi; the signal box waits and retries if it isn't up yet.
+After=network-online.target bluetooth.target northpole-hq.service
 Wants=network-online.target bluetooth.target
 
 [Service]
 # Root keeps GPIO, PWM (sysfs) and BlueZ's D-Bus API (or the BLED112 serial port) simple on a hobby box.
 # To harden: run as your user in the gpio + bluetooth groups (dialout for a BLED112) and add a udev rule for /sys/class/pwm.
 User=root
+# A little ahead of Piper and HQ, so the HC-SR04's microsecond timing isn't held up while Santa's voice is made.
+Nice=-5
 WorkingDirectory=/opt/northpole/signalbox
 ExecStart=/opt/dotnet/dotnet /opt/northpole/signalbox/NorthPole.SignalBox.dll
 Environment=DOTNET_ROOT=/opt/dotnet

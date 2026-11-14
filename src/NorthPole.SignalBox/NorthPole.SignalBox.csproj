@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Runs on the Raspberry Pi 4 next to the track.
+  <!-- Runs on the Raspberry Pi 5 beside the track, next to HQ (or on its own Pi if you split them).
        Talks Bluetooth to the LEGO hub (the Pi's own radio through BlueZ, or a BlueGiga BLED112 dongle), drives the
        GPIO trackside (station sensors, mailbox-flag servo, signal LEDs, the 16x2 station board) and takes jobs from
        HQ over MQTT. -->
