@@ -189,6 +189,7 @@ Then, on the Pi:
 ~/northpole-bench/NorthPole.SignalBox bench signal             # red 3 s, green 3 s, four swaps, then off
 ~/northpole-bench/NorthPole.SignalBox bench signal green 10    # hold one aspect
 ~/northpole-bench/NorthPole.SignalBox bench wait 30            # count magnet passes at the North Pole contact
+~/northpole-bench/NorthPole.SignalBox bench distance 30        # live readings from the mailbox HC-SR04
 ```
 
 Your user needs to be in the `gpio` group, as the first user on Raspberry Pi OS is. The installed copy works the same way: `/opt/northpole/signalbox/NorthPole.SignalBox bench …`.
