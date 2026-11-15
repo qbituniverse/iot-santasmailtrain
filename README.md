@@ -198,7 +198,7 @@ Then, on the Pi:
 ~/northpole-bench/NorthPole.SignalBox bench train power 30 3   # hold one motor power for 3 s, then brake
 ```
 
-For the train, press the hub's green button so its light flashes, and keep the LEGO remote switched off: the hub takes one connection at a time. Your user needs to be in the `gpio` group, as the first user on Raspberry Pi OS is. The installed copy works the same way: `/opt/northpole/signalbox/NorthPole.SignalBox bench …`.
+The signal LEDs tell you what each test wants. Red means it's waiting for you: bring the magnet or your hand to the sensor, or press the hub's green button. Green means it has seen it, the flag is moving, or the train is connected. For the train, press the hub's green button so its light flashes, and keep the LEGO remote switched off: the hub takes one connection at a time. Your user needs to be in the `gpio` group, as the first user on Raspberry Pi OS is. The installed copy works the same way: `/opt/northpole/signalbox/NorthPole.SignalBox bench …`.
 
 ## Configuration
 

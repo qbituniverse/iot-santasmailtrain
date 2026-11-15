@@ -54,7 +54,7 @@ public static class Bench
             {
                 "signal" => await SignalAsync(args[1..], options, loggers, log, stop.Token),
                 "wait" => await WaitAsync(args[1..], options, loggers, log, stop.Token),
-                "distance" => await DistanceAsync(args[1..], options, log, stop.Token),
+                "distance" => await DistanceAsync(args[1..], options, loggers, log, stop.Token),
                 "flag" => await FlagAsync(args[1..], options, loggers, log, stop.Token),
                 "board" => await BoardAsync(args[1..], options, log, stop.Token),
                 "train" => await TrainAsync(args[1..], options, loggers, log, stop.Token),
@@ -178,9 +178,10 @@ public static class Bench
 
     /// <summary>
     /// The mailbox HC-SR04 on its own, through the same UltrasonicSensor the mail run uses: four readings a second, each
-    /// marked when it's close enough to count as the train (Trackside:HomeSensor:DetectWithinCm), then a summary.
+    /// marked when it's close enough to count as the train (Trackside:HomeSensor:DetectWithinCm), then a summary. The
+    /// signal shows it as it happens: red while nothing is near, so bring a hand closer; green while something is.
     /// </summary>
-    static async Task<int> DistanceAsync(string[] args, SignalBoxOptions options, ILogger log, CancellationToken ct)
+    static async Task<int> DistanceAsync(string[] args, SignalBoxOptions options, ILoggerFactory loggers, ILogger log, CancellationToken ct)
     {
         var seconds = args.Length > 0 ? Seconds(args[0]) : 30;
         var o = options.Trackside.HomeSensor;
@@ -188,11 +189,14 @@ public static class Bench
             throw new ArgumentException($"The mailbox sensor is set to {o.Kind}, not Ultrasonic (Trackside:HomeSensor:Kind)");
         using var gpio = PiGpio.Open();
         var sensor = new UltrasonicSensor(gpio, o);
+        using var track = Open(options, loggers); // the signal, as the cue; Open leaves the mailbox sensor to us
         using var window = CancellationTokenSource.CreateLinkedTokenSource(ct);
         window.CancelAfter(TimeSpan.FromSeconds(seconds));
 
         log.LogInformation("Mailbox HC-SR04, Trig on GPIO{Trig} and Echo on GPIO{Echo}: readings for {Seconds} s. Closer than {Near} cm counts as the train",
             o.TriggerPin, o.Pin, seconds, o.DetectWithinCm);
+        log.LogInformation("Signal red: bring your hand closer. It turns green while something is within {Near} cm", o.DetectWithinCm);
+        track.SetSignal(SignalAspect.Red);
         int readings = 0, near = 0, silent = 0;
         double min = double.MaxValue, max = 0;
         try
@@ -206,11 +210,13 @@ public static class Bench
                     max = Math.Max(max, cm);
                     if (cm < o.DetectWithinCm) near++;
                     log.LogInformation(cm < o.DetectWithinCm ? "{Cm,6:0.0} cm   train" : "{Cm,6:0.0} cm", cm);
+                    track.SetSignal(cm < o.DetectWithinCm ? SignalAspect.Green : SignalAspect.Red);
                 }
                 else
                 {
                     silent++;
                     log.LogInformation("    no echo");
+                    track.SetSignal(SignalAspect.Red);
                 }
                 await Task.Delay(TimeSpan.FromMilliseconds(250), window.Token);
             }
@@ -232,7 +238,7 @@ public static class Bench
     /// <summary>
     /// The mailbox flag's SG90 on GPIO18's hardware PWM, moved by GpioTrackside.SetFlag as on a mail run: a short show of
     /// down and up, one position held, or any duty cycle held, to find the right FlagUpDuty and FlagDownDuty.
-    /// Each ends with the flag down.
+    /// Each ends with the flag down. The green light shows each move, for as long as the servo takes to travel.
     /// </summary>
     static async Task<int> FlagAsync(string[] args, SignalBoxOptions options, ILoggerFactory loggers, ILogger log, CancellationToken ct)
     {
@@ -264,11 +270,17 @@ public static class Bench
         log.LogInformation("Flag servo on GPIO18: down is duty {Down:0.000} ({DownMs:0.00} ms), up is {Up:0.000} ({UpMs:0.00} ms)",
             o.FlagDownDuty, o.FlagDownDuty * 20, o.FlagUpDuty, o.FlagUpDuty * 20);
 
+        // Opening the trackside lights red; the flag test uses green alone, lit while the arm is on its way.
+        track.SetSignal(SignalAspect.Off);
         async Task Move(bool up, double hold, string what)
         {
             log.LogInformation("{What}", what);
+            var travel = Math.Min(hold, ServoTravelSeconds);
+            track.SetSignal(SignalAspect.Green);
             track.SetFlag(up);
-            await Task.Delay(TimeSpan.FromSeconds(hold), ct);
+            await Task.Delay(TimeSpan.FromSeconds(travel), ct);
+            track.SetSignal(SignalAspect.Off);
+            await Task.Delay(TimeSpan.FromSeconds(hold - travel), ct);
         }
 
         var upDuty = o.FlagUpDuty;
@@ -371,7 +383,8 @@ public static class Bench
     /// The locomotive's hub (88009) over the Pi's own Bluetooth, through the BlueZTrain the mail run uses: connect, read
     /// the battery, the headlights on and off, then a slow nudge forward and back at ApproachSpeed. Or one motor power
     /// held for a few seconds, to feel out CruiseSpeed and ApproachSpeed. Either way it ends braked, lights off and
-    /// disconnected, also when stopped with Ctrl+C.
+    /// disconnected, also when stopped with Ctrl+C. The signal shows where it is: red while it waits for the hub's
+    /// green button, green from the moment the train is connected until it lets go.
     /// </summary>
     static async Task<int> TrainAsync(string[] args, SignalBoxOptions options, ILoggerFactory loggers, ILogger log, CancellationToken ct)
     {
@@ -388,7 +401,11 @@ public static class Bench
 
         log.LogInformation("Train over Bluetooth ({Adapter}): motor on port {Motor}, headlights on port {Light}. Keep the LEGO remote switched off",
             o.BluetoothAdapter, (char)('A' + o.MotorPort), (char)('A' + o.LightPort));
+        // Declared first, so it is disposed last: the signal goes off only after the train has braked and let go.
+        using var track = Open(options, loggers);
         await using var train = new BlueZTrain(Options.Create(options), loggers.CreateLogger<BlueZTrain>());
+        track.SetSignal(SignalAspect.Red);
+        log.LogInformation("Signal red: press the hub's green button now");
         try
         {
             await train.ConnectAsync(ct);
@@ -398,6 +415,8 @@ public static class Bench
             log.LogWarning("No LEGO hub answered in 60 s. Press the hub's green button so its light flashes, keep the LEGO remote off, and bring the train within a few metres of the Pi");
             return 1;
         }
+        track.SetSignal(SignalAspect.Green);
+        log.LogInformation("Signal green: the train is connected");
 
         async Task Step(string what, Func<Task> act, double hold)
         {
@@ -441,6 +460,9 @@ public static class Bench
         options.Trackside.HomeSensor = new StationSensorOptions { Kind = SensorKind.None };
         return new GpioTrackside(Options.Create(options), loggers.CreateLogger<GpioTrackside>());
     }
+
+    /// <summary>About how long an SG90 takes to swing the flag between down and up, unloaded.</summary>
+    const double ServoTravelSeconds = 0.6;
 
     static double Seconds(string value, double max = 600) =>
         double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var s) && s > 0 && s <= max
