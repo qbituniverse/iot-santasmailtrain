@@ -155,6 +155,7 @@ body.elves { background: #f6f3ee; }
 .elves textarea.voice-text { display: block; min-height: 0; margin-top: 12px; padding: 8px 10px; border-width: 1px;
   border-radius: 10px; font-family: inherit; font-size: 14px; line-height: 1.4; }
 #uptime, #spUptime { font-variant-numeric: tabular-nums; }
+.driver-page { max-width: 560px; margin: 0 auto; }
 #trainStatus .stale, #speakerStatus .stale { color: #8f1d1d; font-weight: 600; }
 
 .alert { background: #fff6e8; border: 1px solid #f0cf97; border-left: 5px solid var(--warn); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }

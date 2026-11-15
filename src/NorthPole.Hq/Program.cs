@@ -275,19 +275,30 @@ elves.MapPost("/children/{childId}/new-code", (string childId, FamilyService fam
     family.FindById(childId) is null ? Results.NotFound() : Results.Ok(new { code = family.RegenerateCode(childId) }));
 
 elves.MapGet("/cards", (FamilyService family, QrCards cards) =>
-    family.Children.Select(c => cards.Build(c, family.CodeFor(c.Id))));
+    family.Children.Select(c => cards.Build(c, family.CodeFor(c.Id))).Append(cards.BuildDriver()));
 
-// now: the Pi's clock, so the dashboard can time the hub's connection and spot an old state whatever the phone's clock says.
-elves.MapGet("/train", (MailTrainClient train, MqttLink mqtt) =>
-    new { mqttConnected = mqtt.IsConnected, online = train.TrainLooksOnline, state = train.State, now = DateTimeOffset.Now });
+elves.MapGet("/train", TrainStatus);
+elves.MapPost("/train/{command}", SendTrainCommand);
 
-// The train driver sends Drive with ?speed=0..100; the signal box caps it at its MaxSpeed.
-elves.MapPost("/train/{command}", async (TrainCommandKind command, int? speed, MailTrainClient train) =>
-    command == TrainCommandKind.Drive && speed is not (>= 0 and <= 100)
-        ? Results.BadRequest("Drive needs a speed from 0 to 100")
-        : await train.SendCommandAsync(command, command == TrainCommandKind.Drive ? speed : null)
-            ? Results.Ok()
-            : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
+// =================================================================================================
+// The train driver (/driver, from its own QR card): the train's status, Connect and Disconnect, and the driver's
+// controls, with no PIN, so anyone on the home Wi-Fi can drive. Mail runs stay with the elves: no Test run here, and
+// the signal box still caps the speed, won't drive during a run, and brakes if HQ goes quiet. Stop still works, as a
+// brake should.
+// =================================================================================================
+
+TrainCommandKind[] driverCommands =
+    [TrainCommandKind.Drive, TrainCommandKind.Stop, TrainCommandKind.LightsOn, TrainCommandKind.LightsOff,
+     TrainCommandKind.Connect, TrainCommandKind.Disconnect];
+
+app.MapGet("/driver", (IWebHostEnvironment env) =>
+    Results.File(Path.Combine(env.WebRootPath, "driver.html"), "text/html; charset=utf-8"));
+var driver = app.MapGroup("/api/driver");
+driver.MapGet("/train", TrainStatus);
+driver.MapPost("/train/{command}", (TrainCommandKind command, int? speed, MailTrainClient train) =>
+    driverCommands.Contains(command)
+        ? SendTrainCommand(command, speed, train)
+        : Task.FromResult(Results.StatusCode(StatusCodes.Status403Forbidden)));
 
 elves.MapGet("/summary", (WishStore store, FamilyService family) =>
 {
@@ -302,6 +313,18 @@ elves.MapGet("/summary", (WishStore store, FamilyService family) =>
 });
 
 app.Run();
+
+// now: the Pi's clock, so a page can time the hub's connection and spot an old state whatever the phone's clock says.
+static object TrainStatus(MailTrainClient train, MqttLink mqtt) =>
+    new { mqttConnected = mqtt.IsConnected, online = train.TrainLooksOnline, state = train.State, now = DateTimeOffset.Now };
+
+// The driver sends Drive with ?speed=0..100; the signal box caps it at its MaxSpeed.
+static async Task<IResult> SendTrainCommand(TrainCommandKind command, int? speed, MailTrainClient train) =>
+    command == TrainCommandKind.Drive && speed is not (>= 0 and <= 100)
+        ? Results.BadRequest("Drive needs a speed from 0 to 100")
+        : await train.SendCommandAsync(command, command == TrainCommandKind.Drive ? speed : null)
+            ? Results.Ok()
+            : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
 
 record LoginRequest(string? Pin);
 record BoughtRequest(bool Bought);

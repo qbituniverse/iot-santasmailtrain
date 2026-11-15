@@ -8,7 +8,8 @@ public sealed record LegoPart(string Name, string DesignId, int Length, int Coun
 
 public sealed record LegoPlan(int Baseplate, int CodeModules, int Offset, int TileCount, IReadOnlyList<LegoPart> Parts, string Svg);
 
-public sealed record QrCard(string ChildId, string Name, string Url, int Version, string QrSvg, LegoPlan Lego);
+/// <param name="Kind">"wish" for a child's wish card, "driver" for the train driver's card, which has no code to renew.</param>
+public sealed record QrCard(string ChildId, string Name, string Url, int Version, string QrSvg, LegoPlan Lego, string Kind = "wish");
 
 /// <summary>
 /// Makes each child's QR code twice: as a printable card, and as a LEGO mosaic build plan
@@ -29,13 +30,20 @@ public sealed class QrCards(IOptions<HqOptions> options)
 
     public string WishUrl(string code) => $"{_o.Qr.BaseUrl.TrimEnd('/')}/W/{code}".ToUpperInvariant();
 
-    public QrCard Build(ChildOptions child, string code)
+    /// <summary>The train driver's page. HTTP://NP.LOCAL/DRIVER still fits a version 1 code, at the lower error correction.</summary>
+    public string DriverUrl => $"{_o.Qr.BaseUrl.TrimEnd('/')}/DRIVER".ToUpperInvariant();
+
+    public QrCard Build(ChildOptions child, string code) => Card(child.Id, child.Name, WishUrl(code), "wish");
+
+    /// <summary>The card that opens the train driver's page: the same for everyone, so there's no code to renew.</summary>
+    public QrCard BuildDriver() => Card("driver", "The Train Driver", DriverUrl, "driver");
+
+    QrCard Card(string id, string name, string url, string kind)
     {
-        var url = WishUrl(code);
         var data = SmallestCode(url);
         var qrSvg = new SvgQRCode(data).GetGraphic(8);
         var lego = BuildLegoPlan(data, _o.Qr.BaseplateStuds);
-        return new QrCard(child.Id, child.Name, url, data.Version, qrSvg, lego);
+        return new QrCard(id, name, url, data.Version, qrSvg, lego, kind);
     }
 
     /// <summary>Tries both error-correction levels and keeps whichever needs fewer modules (fewer bricks).</summary>

@@ -1,0 +1,7 @@
+[Unit]
+Description=Santa's Mail Train: a snapshot of the Pi's own data (card codes, letters, the family's settings)
+
+[Service]
+Type=oneshot
+User=__USER__
+ExecStart=/usr/local/bin/northpole-backup __HOME__/northpole-backups

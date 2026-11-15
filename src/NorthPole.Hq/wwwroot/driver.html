@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>The Train Driver</title>
+  <link rel="stylesheet" href="/css/site.css">
+</head>
+<body class="elves">
+  <header class="top">
+    <h1>North Pole Mail</h1>
+  </header>
+
+  <main class="page">
+    <section class="panel driver-page" id="trainPanel">
+      <h2>The Train Driver</h2>
+      <div id="trainStatus" class="muted">Checking…</div>
+      <div class="actions">
+        <button class="btn secondary" id="connect" data-cmd="Connect" disabled>Connect</button>
+        <button class="btn secondary" id="disconnect" data-cmd="Disconnect" disabled>Disconnect</button>
+      </div>
+      <section class="driver" aria-label="Drive the train">
+        <div class="actions">
+          <button class="btn go" id="driveStart" data-drive>Start</button>
+          <button class="btn" data-cmd="Stop">Stop</button>
+        </div>
+        <label class="speed" for="speed">
+          <span>Speed <output id="speedOut" for="speed">30</output> of <span id="speedMax">70</span></span>
+          <input type="range" id="speed" min="0" max="70" step="10" value="30">
+        </label>
+        <div class="actions">
+          <button class="btn secondary" data-cmd="LightsOn">Lights on</button>
+          <button class="btn secondary" data-cmd="LightsOff">Lights off</button>
+        </div>
+        <p class="muted" id="driverNote" role="status"></p>
+      </section>
+    </section>
+  </main>
+
+<script src="/js/train-panel.js"></script>
+<script>
+(() => {
+  // No PIN here: the driver's API takes only the driving commands, and the signal box keeps its own limits.
+  async function api(path, options) {
+    const res = await fetch('/api/driver' + path, options);
+    if (!res.ok && res.status !== 503) throw new Error(`The train page got ${res.status}`);
+    return res;
+  }
+
+  const panel = NorthPole.trainPanel({ root: document.getElementById('trainPanel'), api, onCommand: refresh });
+
+  async function refresh() {
+    try { panel.render(await api('/train').then(r => r.json())); }
+    catch (e) { console.error(e); }
+  }
+
+  // Every 3 s, and at once when the phone comes back to the page.
+  refresh();
+  setInterval(() => { if (!document.hidden) refresh(); }, 3000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+})();
+</script>
+</body>
+</html>

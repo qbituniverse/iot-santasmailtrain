@@ -1,0 +1,29 @@
+<#
+  After a fresh card or on a new Pi: copies a snapshot from backup.ps1 back to the Pi, and prints the one line to run
+  there. Publish and run setup.sh first, so HQ and the signal box are installed for the snapshot to go back into.
+
+    .\deploy\restore.ps1 -PiHost pi@np.local                         # the newest snapshot in Documents\NorthPole backups
+    .\deploy\restore.ps1 -PiHost pi@np.local -Snapshot D:\northpole-np-20261215-210000.tar.gz
+#>
+param(
+    [string]$PiHost = "$env:USERNAME@np.local",
+    [string]$Snapshot,
+    [string]$From = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'NorthPole backups')
+)
+$ErrorActionPreference = 'Stop'
+
+if (-not $Snapshot) {
+    $newest = Get-ChildItem $From -Filter 'northpole-*.tar.gz' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $newest) { throw "No snapshots in ${From}; name one with -Snapshot" }
+    $Snapshot = $newest.FullName
+}
+$name = Split-Path $Snapshot -Leaf
+Write-Host "Copying $name to $PiHost..."
+scp -q $Snapshot "${PiHost}:$name"
+if ($LASTEXITCODE -ne 0) { throw "Couldn't copy $Snapshot to the Pi" }
+
+Write-Host ""
+Write-Host "Now on the Pi (it asks for your password):"
+Write-Host "  sudo bash ~/northpole-setup/restore.sh ~/$name"
+Write-Host "Then put the Claude key and the PIN back in /etc/northpole/hq.env if this is a fresh card."
