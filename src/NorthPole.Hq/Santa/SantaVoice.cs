@@ -9,15 +9,24 @@ namespace NorthPole.Hq.Santa;
 /// Piper runs as its own little HTTP server so the voice model stays loaded:
 ///   python3 -m piper.http_server -m en_GB-northern_english_male-medium
 /// The WAV is saved next to the wish, played on the station speaker, and offered to the child's phone.
+/// The station speaker is a Chromecast speaker such as a soundbar (<see cref="VoiceOptions.CastTo"/>), or the Pi's own
+/// output through <see cref="VoiceOptions.PlayCommand"/>.
 /// </summary>
-public sealed class SantaVoice(IOptions<HqOptions> options, HttpClient http, ILogger<SantaVoice> log)
+public sealed class SantaVoice(IOptions<HqOptions> options, HttpClient http, CastSpeaker cast, ILogger<SantaVoice> log)
 {
+    const string TestLine = "Ho ho ho! This is Santa, checking the speaker at the North Pole. Can you hear me?";
+
+    // One Santa at a time. Static, because each request gets its own SantaVoice (it's a typed HTTP client).
+    static readonly SemaphoreSlim Speaker = new(1, 1);
+
     readonly HqOptions _o = options.Value;
-    readonly SemaphoreSlim _speaker = new(1, 1); // one Santa at a time
 
     string VoiceDir => Directory.CreateDirectory(Path.Combine(Path.GetFullPath(_o.DataDirectory), "voice")).FullName;
 
-    public async Task<string?> SynthesizeAsync(Guid wishId, string text, CancellationToken ct)
+    public Task<string?> SynthesizeAsync(Guid wishId, string text, CancellationToken ct) =>
+        SynthesizeAsync($"{wishId}.wav", text, ct);
+
+    async Task<string?> SynthesizeAsync(string fileName, string text, CancellationToken ct)
     {
         if (_o.Voice.Mode == VoiceMode.None || string.IsNullOrWhiteSpace(text)) return null;
         try
@@ -28,7 +37,7 @@ public sealed class SantaVoice(IOptions<HqOptions> options, HttpClient http, ILo
                 ct);
             response.EnsureSuccessStatusCode();
 
-            var file = Path.Combine(VoiceDir, $"{wishId}.wav");
+            var file = Path.Combine(VoiceDir, fileName);
             await using (var stream = File.Create(file))
                 await response.Content.CopyToAsync(stream, ct);
             return Path.GetFileName(file);
@@ -43,25 +52,45 @@ public sealed class SantaVoice(IOptions<HqOptions> options, HttpClient http, ILo
     public string? PathOf(string? voiceFile) =>
         voiceFile is null ? null : Path.Combine(VoiceDir, Path.GetFileName(voiceFile));
 
-    /// <summary>Plays the arrival jingle (if any) and then Santa, on the North Pole station speaker.</summary>
-    public async Task PlayOnStationAsync(string? voiceFile, CancellationToken ct)
+    /// <summary>
+    /// Plays the arrival jingle (if any) and then Santa, on the North Pole station speaker. Returns where it played,
+    /// or null when station playback is off or there was nothing to play.
+    /// </summary>
+    public async Task<string?> PlayOnStationAsync(string? voiceFile, CancellationToken ct)
     {
-        if (!_o.Voice.PlayOnStation) return;
+        if (!_o.Voice.PlayOnStation) return null;
 
-        await _speaker.WaitAsync(ct);
+        var files = new List<string>();
+        if (_o.Voice.ArrivalSound is { } jingle)
+        {
+            var jinglePath = Path.Combine(Path.GetFullPath(_o.DataDirectory), jingle);
+            if (File.Exists(jinglePath)) files.Add(jinglePath);
+        }
+        if (PathOf(voiceFile) is { } path && File.Exists(path)) files.Add(path);
+        if (files.Count == 0) return null;
+
+        await Speaker.WaitAsync(ct);
         try
         {
-            if (_o.Voice.ArrivalSound is { } jingle)
+            if (cast.Enabled)
             {
-                var jinglePath = Path.Combine(Path.GetFullPath(_o.DataDirectory), jingle);
-                if (File.Exists(jinglePath)) await PlayAsync(jinglePath, ct);
+                if (await cast.PlayAsync(files, ct)) return _o.Voice.CastTo;
+                log.LogWarning("Santa plays on the Pi's own output instead");
             }
-            if (PathOf(voiceFile) is { } path && File.Exists(path)) await PlayAsync(path, ct);
+            foreach (var file in files) await PlayAsync(file, ct);
+            return "the Pi's own output";
         }
         finally
         {
-            _speaker.Release();
+            Speaker.Release();
         }
+    }
+
+    /// <summary>The dashboard's speaker check: Santa says a short line on the station speaker.</summary>
+    public async Task<string?> TestStationAsync(CancellationToken ct)
+    {
+        var file = await SynthesizeAsync("speaker-test.wav", TestLine, ct);
+        return file is null ? null : await PlayOnStationAsync(file, ct);
     }
 
     async Task PlayAsync(string file, CancellationToken ct)
