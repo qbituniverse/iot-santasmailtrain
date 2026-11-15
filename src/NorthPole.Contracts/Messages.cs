@@ -45,6 +45,7 @@ public sealed record MailProgress(Guid WishId, MailStage Stage, string? Detail, 
 
 public sealed record ReturnHome(Guid WishId);
 
+/// <param name="MaxSpeed">The signal box's speed cap, so the dashboard's speed slider can stop there.</param>
 public sealed record TrainState(
     bool HubConnected,
     int? BatteryPercent,
@@ -52,11 +53,16 @@ public sealed record TrainState(
     bool Busy,
     string TrainMode,
     string TracksideMode,
-    DateTimeOffset At);
+    DateTimeOffset At,
+    int MaxSpeed = 0);
 
-public enum TrainCommandKind { Stop, TestRun, LightsOn, LightsOff, Whistle }
+/// <summary>
+/// Stop brakes and ends the mail run in progress. Drive is the dashboard's train driver: it sets the motor to
+/// <see cref="TrainCommand.Speed"/> (0 brakes), and only between mail runs.
+/// </summary>
+public enum TrainCommandKind { Stop, TestRun, LightsOn, LightsOff, Whistle, Drive }
 
-public sealed record TrainCommand(TrainCommandKind Kind);
+public sealed record TrainCommand(TrainCommandKind Kind, int? Speed = null);
 
 public static class NorthPoleJson
 {

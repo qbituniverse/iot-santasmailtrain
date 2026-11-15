@@ -72,7 +72,8 @@ public sealed class MailTrainClient
 
     public Task SendHomeAsync(Guid wishId) => _mqtt.PublishAsync(Topics.ReturnHome, new ReturnHome(wishId));
 
-    public Task<bool> SendCommandAsync(TrainCommandKind kind) => _mqtt.PublishAsync(Topics.Command, new TrainCommand(kind));
+    public Task<bool> SendCommandAsync(TrainCommandKind kind, int? speed = null) =>
+        _mqtt.PublishAsync(Topics.Command, new TrainCommand(kind, speed));
 
     async Task OnProgress(MailProgress p)
     {
