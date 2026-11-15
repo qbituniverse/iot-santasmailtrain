@@ -13,13 +13,21 @@ public interface ITrain
 {
     bool IsConnected { get; }
     int? BatteryPercent { get; }
+    double? BatteryVolts { get; }
+    DateTimeOffset? ConnectedSince { get; }
     string Mode { get; }
+
+    /// <summary>The hub dropped, or its battery reading changed: worth telling HQ straight away.</summary>
+    event Action? StatusChanged;
 
     Task ConnectAsync(CancellationToken ct);
     Task SetPowerAsync(int power, CancellationToken ct);
     Task BrakeAsync(CancellationToken ct);
     Task SetLightAsync(int brightness, CancellationToken ct);
     Task RefreshBatteryAsync(CancellationToken ct);
+
+    /// <summary>Lets the hub go on purpose. Its light flashes again, and it can be connected again while it does.</summary>
+    Task DisconnectAsync(CancellationToken ct);
 }
 
 /// <summary>
@@ -36,10 +44,14 @@ public sealed class PoweredUpTrain(IOptions<SignalBoxOptions> options, ILoggerFa
     readonly TrainOptions _o = options.Value.Train;
     ServiceProvider? _services;
     TwoPortHub? _hub;
+    DateTimeOffset _since;
 
     public bool IsConnected => _hub?.IsConnected == true;
     public int? BatteryPercent { get; private set; }
+    public double? BatteryVolts => null; // not read through SharpBrick
+    public DateTimeOffset? ConnectedSince => IsConnected ? _since : null;
     public string Mode => "PoweredUp";
+    public event Action? StatusChanged;
 
     public async Task ConnectAsync(CancellationToken ct)
     {
@@ -61,6 +73,7 @@ public sealed class PoweredUpTrain(IOptions<SignalBoxOptions> options, ILoggerFa
         timeout.CancelAfter(TimeSpan.FromSeconds(60));
         _hub = await host.DiscoverAsync<TwoPortHub>(timeout.Token);
         await _hub.ConnectAsync();
+        _since = DateTimeOffset.Now;
         await RefreshBatteryAsync(ct);
         log.LogInformation("Connected to hub {Name}, battery {Battery}%", _hub.AdvertisingName, BatteryPercent);
     }
@@ -82,7 +95,13 @@ public sealed class PoweredUpTrain(IOptions<SignalBoxOptions> options, ILoggerFa
         if (_hub is null) return;
         await _hub.RequestHubPropertySingleUpdate(HubProperty.BatteryVoltage);
         await Task.Delay(200, ct); // the reply arrives asynchronously and updates the property
+        var before = BatteryPercent;
         BatteryPercent = _hub.BatteryVoltageInPercent;
+        if (before is not null && BatteryPercent != before)
+        {
+            log.LogInformation("Hub battery {Battery}% (was {Before}%)", BatteryPercent, before);
+            StatusChanged?.Invoke();
+        }
     }
 
     async Task SendAsync(byte port, sbyte power)
@@ -106,6 +125,14 @@ public sealed class PoweredUpTrain(IOptions<SignalBoxOptions> options, ILoggerFa
             _hub = null; // hub switched off or out of range: the signal box will reconnect
             throw;
         }
+    }
+
+    public async Task DisconnectAsync(CancellationToken ct)
+    {
+        if (_hub is not { } hub) return;
+        _hub = null;
+        await hub.DisconnectAsync();
+        log.LogInformation("Let the hub go");
     }
 
     public async ValueTask DisposeAsync()
@@ -139,14 +166,20 @@ public sealed class BlueZTrain(IOptions<SignalBoxOptions> options, ILogger<BlueZ
     BlueZDevice? _device;
     GattCharacteristic? _lwp;
     volatile bool _connected;
+    DateTimeOffset _since;
+    double? _volts;
 
     public bool IsConnected => _connected;
     public int? BatteryPercent { get; private set; }
+    public double? BatteryVolts => _connected ? _volts : null;
+    public DateTimeOffset? ConnectedSince => _connected ? _since : null;
     public string Mode => "BlueZ";
+    public event Action? StatusChanged;
 
     public async Task ConnectAsync(CancellationToken ct)
     {
         Release();
+        (BatteryPercent, _volts) = (null, null);
         var adapter = await BlueZManager.GetAdapterAsync(_o.BluetoothAdapter);
         log.LogInformation("Looking for the LEGO hub on {Adapter}... press the green button on the locomotive", _o.BluetoothAdapter);
 
@@ -163,10 +196,12 @@ public sealed class BlueZTrain(IOptions<SignalBoxOptions> options, ILogger<BlueZ
 
         lwp.Value += OnHubMessageAsync; // subscribing turns notifications on
         device.Disconnected += OnDisconnectedAsync;
-        (_device, _lwp, _connected) = (device, lwp, true);
+        (_device, _lwp, _since, _connected) = (device, lwp, DateTimeOffset.Now, true);
 
         await RefreshBatteryAsync(ct);
-        log.LogInformation("Connected to hub {Name}, battery {Battery}%", await device.GetAliasAsync(), BatteryPercent);
+        for (var i = 0; i < 10 && (BatteryPercent is null || _volts is null); i++) await Task.Delay(100, ct); // first answers
+        log.LogInformation("Connected to hub {Name}, battery {Battery} ({Volts})", await device.GetAliasAsync(),
+            BatteryPercent is { } b ? $"{b}%" : "not reported yet", _volts is { } v ? $"{v:0.00} V" : "voltage not reported yet");
     }
 
     /// <summary>
@@ -218,7 +253,14 @@ public sealed class BlueZTrain(IOptions<SignalBoxOptions> options, ILogger<BlueZ
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(60));
-            return await found.Task.WaitAsync(timeout.Token);
+            try
+            {
+                return await found.Task.WaitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new TimeoutException("no hub seen in 60 s");
+            }
         }
         finally
         {
@@ -243,20 +285,37 @@ public sealed class BlueZTrain(IOptions<SignalBoxOptions> options, ILogger<BlueZ
     public async Task RefreshBatteryAsync(CancellationToken ct)
     {
         if (!_connected) return;
+        // The voltage comes by itself once subscribed; ask again until the first reading arrives.
+        if (_volts is null) await WriteAsync(LegoWireless.SubscribeVoltage);
         await WriteAsync(LegoWireless.RequestBattery);
-        await Task.Delay(200, ct); // the reply arrives as a notification and updates BatteryPercent
+        await Task.Delay(200, ct); // the replies arrive as notifications and update BatteryPercent and the voltage
     }
 
     Task OnHubMessageAsync(GattCharacteristic sender, GattCharacteristicValueEventArgs e)
     {
-        if (LegoWireless.TryReadBattery(e.Value, out var percent)) BatteryPercent = percent;
+        if (LegoWireless.TryReadVolts(e.Value, out var volts))
+        {
+            _volts = volts;
+        }
+        else if (LegoWireless.TryReadBattery(e.Value, out var percent) && percent != BatteryPercent)
+        {
+            var before = BatteryPercent;
+            BatteryPercent = percent;
+            if (before is not null)
+            {
+                log.LogInformation("Hub battery {Battery}% (was {Before}%), {Volts}", percent, before,
+                    _volts is { } v ? $"{v:0.00} V" : "voltage unknown");
+                StatusChanged?.Invoke();
+            }
+        }
         return Task.CompletedTask;
     }
 
     Task OnDisconnectedAsync(BlueZDevice sender, BlueZEventArgs e)
     {
         _connected = false; // switched off or out of range: the signal box will reconnect
-        log.LogWarning("The LEGO hub disconnected");
+        log.LogWarning("The LEGO hub disconnected after {Connected}", (DateTimeOffset.Now - _since).ToString(@"h\:mm\:ss"));
+        StatusChanged?.Invoke();
         return Task.CompletedTask;
     }
 
@@ -271,9 +330,28 @@ public sealed class BlueZTrain(IOptions<SignalBoxOptions> options, ILogger<BlueZ
         }
         catch
         {
+            var was = _connected;
             _connected = false; // hub switched off or out of range: the signal box will reconnect
+            if (was) StatusChanged?.Invoke();
             throw;
         }
+    }
+
+    public async Task DisconnectAsync(CancellationToken ct)
+    {
+        if (_device is not { } device) return;
+        var connectedFor = DateTimeOffset.Now - _since;
+        _connected = false;
+        device.Disconnected -= OnDisconnectedAsync; // on purpose, not a drop
+        try
+        {
+            await device.DisconnectAsync();
+        }
+        finally
+        {
+            Release();
+        }
+        log.LogInformation("Let the hub go after {Connected}", connectedFor.ToString(@"h\:mm\:ss"));
     }
 
     void Release()
@@ -335,6 +413,30 @@ public static class LegoWireless
     /// </summary>
     public static byte[] StartPower(byte port, sbyte power) => [0x08, 0x00, 0x81, port, 0x11, 0x51, 0x00, (byte)power];
 
+    /// <summary>
+    /// The hub's own voltage sensor, port 0x3C on the 88009. Mode 0 ("VLT L") reads 0..3893 for 0..9600 mV, as the hub
+    /// itself describes the mode when asked (port mode information 0x22).
+    /// </summary>
+    public const byte VoltagePort = 0x3C;
+
+    /// <summary>
+    /// Port input format setup 0x41 for the voltage sensor: mode 0, report a change of 40 or more (about 0.1 V), notify on.
+    /// The hub then sends port values (0x45) by itself.
+    /// </summary>
+    public static readonly byte[] SubscribeVoltage = [0x0A, 0x00, 0x41, VoltagePort, 0x00, 40, 0x00, 0x00, 0x00, 0x01];
+
+    /// <summary>Port value (0x45) from the voltage sensor: [6, hub, 0x45, 0x3C, low, high].</summary>
+    public static bool TryReadVolts(byte[] message, out double volts)
+    {
+        if (message is [_, _, 0x45, VoltagePort, var low, var high, ..])
+        {
+            volts = Math.Round((low | high << 8) * 9.6 / 3893, 2);
+            return true;
+        }
+        volts = 0;
+        return false;
+    }
+
     /// <summary>Hub property update (0x01, operation 0x06) for the battery: [6, hub, 0x01, 0x06, 0x06, percent].</summary>
     public static bool TryReadBattery(byte[] message, out byte percent)
     {
@@ -356,24 +458,38 @@ public static class LegoWireless
 public sealed class SimulatedTrain(ILogger<SimulatedTrain> log) : ITrain
 {
     double _battery = 100;
+    DateTimeOffset _since;
 
     public bool IsConnected { get; private set; }
     public int? BatteryPercent => (int)_battery;
+    public double? BatteryVolts => Math.Round(6 + 3 * _battery / 100, 2); // six cells, roughly 9 V full and 6 V flat
+    public DateTimeOffset? ConnectedSince => IsConnected ? _since : null;
     public string Mode => "Simulated";
     public int Power { get; private set; }
+    public event Action? StatusChanged;
 
-    public Task ConnectAsync(CancellationToken ct)
+    public async Task ConnectAsync(CancellationToken ct)
     {
-        IsConnected = true;
+        log.LogInformation("(sim) Looking for the hub: it answers in 3 s, as if its green button were pressed");
+        await Task.Delay(TimeSpan.FromSeconds(3), ct);
+        (IsConnected, _since) = (true, DateTimeOffset.Now);
         log.LogInformation("Simulated train ready (no Bluetooth needed)");
+    }
+
+    public Task DisconnectAsync(CancellationToken ct)
+    {
+        IsConnected = false;
+        log.LogInformation("(sim) Let the hub go");
         return Task.CompletedTask;
     }
 
     public Task SetPowerAsync(int power, CancellationToken ct)
     {
         Power = power;
+        var before = BatteryPercent;
         _battery = Math.Max(0, _battery - Math.Abs(power) / 200.0);
         log.LogInformation("Train power {Power}", power);
+        if (BatteryPercent != before) StatusChanged?.Invoke();
         return Task.CompletedTask;
     }
 

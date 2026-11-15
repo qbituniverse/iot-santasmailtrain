@@ -232,8 +232,9 @@ elves.MapPost("/children/{childId}/new-code", (string childId, FamilyService fam
 elves.MapGet("/cards", (FamilyService family, QrCards cards) =>
     family.Children.Select(c => cards.Build(c, family.CodeFor(c.Id))));
 
+// now: the Pi's clock, so the dashboard can time the hub's connection and spot an old state whatever the phone's clock says.
 elves.MapGet("/train", (MailTrainClient train, MqttLink mqtt) =>
-    new { mqttConnected = mqtt.IsConnected, online = train.TrainLooksOnline, state = train.State });
+    new { mqttConnected = mqtt.IsConnected, online = train.TrainLooksOnline, state = train.State, now = DateTimeOffset.Now });
 
 // The train driver sends Drive with ?speed=0..100; the signal box caps it at its MaxSpeed.
 elves.MapPost("/train/{command}", async (TrainCommandKind command, int? speed, MailTrainClient train) =>
