@@ -31,6 +31,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Unlike the Web and Worker SDKs, the plain SDK doesn't copy the settings into the build. Without them the Pi
+         would run on the defaults in SignalBoxOptions, which are the laptop's simulation. -->
+    <None Update="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\NorthPole.Contracts\NorthPole.Contracts.csproj" />
     <ProjectReference Include="..\NorthPole.Messaging\NorthPole.Messaging.csproj" />
   </ItemGroup>
