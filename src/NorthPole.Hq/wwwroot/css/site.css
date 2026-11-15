@@ -151,6 +151,9 @@ body.elves { background: #f6f3ee; }
 .driver #driverNote:empty { display: none; }
 #voiceNote { margin: 8px 0 0; }
 #voiceNote:empty { display: none; }
+/* The speaker test line: the letter box's look, at the dashboard's size. */
+.elves textarea.voice-text { display: block; min-height: 0; margin-top: 12px; padding: 8px 10px; border-width: 1px;
+  border-radius: 10px; font-family: inherit; font-size: 14px; line-height: 1.4; }
 #uptime, #spUptime { font-variant-numeric: tabular-nums; }
 #trainStatus .stale, #speakerStatus .stale { color: #8f1d1d; font-weight: 600; }
 

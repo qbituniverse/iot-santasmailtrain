@@ -5,6 +5,8 @@ using Anthropic;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using NorthPole.Contracts;
@@ -47,6 +49,7 @@ else
 builder.Services.AddHttpClient<SantaVoice>(http => http.Timeout = TimeSpan.FromSeconds(60));
 builder.Services.AddSingleton<CastSpeaker>();
 builder.Services.AddSingleton<SpeakerLink>();
+builder.Services.AddSingleton<SantaLoudness>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerLink>());
 
 // ---- Wishes, family, QR cards, the mail train ----------------------------------------------------
@@ -229,26 +232,35 @@ elves.MapPost("/wishes/{id:guid}/replay", (Guid id, WishStore store, SantaVoice 
 });
 
 // Santa's speaker, when it's a Chromecast one: its link, volume and Santa's level, with the Pi's clock for the timers.
-elves.MapGet("/speaker", (SpeakerLink link, IOptions<HqOptions> o) =>
+elves.MapGet("/speaker", (SpeakerLink link, SantaLoudness loudness) =>
 {
     var state = link.State;
-    var voice = o.Value.Voice;
     return new
     {
         state,
-        santaVolume = state.Volume is { } level ? voice.SantaLevel(level) : (double?)null,
-        above = voice.CastVolumeAbove,
-        min = voice.CastVolumeMin,
-        max = voice.CastVolumeMax,
+        santaVolume = state.Volume is { } level ? loudness.LevelFor(level) : (double?)null,
+        above = loudness.Above,
+        mostAbove = SantaLoudness.MostAbove,
+        min = loudness.Min,
+        max = loudness.Max,
         now = DateTimeOffset.Now,
     };
 });
 elves.MapPost("/speaker/connect", (SpeakerLink link) => { link.Connect(); return Results.Ok(); });
 elves.MapPost("/speaker/disconnect", (SpeakerLink link) => { link.Disconnect(); return Results.Ok(); });
 
-// The dashboard's speaker check: Santa says a short line on the station speaker, and the answer says where.
-elves.MapPost("/voice/test", async (SantaVoice voice, CancellationToken ct) =>
-    await voice.TestStationAsync(ct) is { } speaker
+// The dashboard's loudness slider: Santa plays this far above the speaker's volume, 0 to 0.3.
+elves.MapPost("/speaker/loudness", (double above, SantaLoudness loudness) =>
+{
+    if (above is < 0 or > SantaLoudness.MostAbove) return Results.BadRequest($"above must be 0 to {SantaLoudness.MostAbove}");
+    loudness.Set(above);
+    return Results.Ok();
+});
+
+// The dashboard's speaker check: Santa says the elf's words, or his usual line, on the station speaker; the answer says where.
+elves.MapPost("/voice/test", async ([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] VoiceTestRequest? test,
+        SantaVoice voice, CancellationToken ct) =>
+    await voice.TestStationAsync(test?.Text, ct) is { } speaker
         ? Results.Ok(new { speaker })
         : Results.Problem("Santa couldn't speak: is Piper running, and is PlayOnStation on?", statusCode: 503));
 
@@ -293,3 +305,4 @@ app.Run();
 
 record LoginRequest(string? Pin);
 record BoughtRequest(bool Bought);
+record VoiceTestRequest(string? Text);

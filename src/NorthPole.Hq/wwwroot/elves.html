@@ -62,6 +62,13 @@
           <button class="btn secondary" id="speakerConnect" disabled>Connect</button>
           <button class="btn secondary" id="speakerDisconnect" disabled>Disconnect</button>
         </div>
+        <label class="speed" for="loudness">
+          <span>Santa's loudness: the volume + <output id="loudnessOut" for="loudness">15</output></span>
+          <input type="range" id="loudness" min="0" max="30" step="5" value="15" disabled>
+        </label>
+        <textarea class="voice-text" id="voiceText" rows="2" maxlength="300"
+          placeholder="Ho ho ho! This is Santa, checking the speaker at the North Pole. Can you hear me?"
+          aria-label="What Santa says in the test. Leave it empty for his usual line."></textarea>
         <div class="actions">
           <button class="btn secondary" id="voiceTest">Test Santa's voice</button>
         </div>
@@ -196,11 +203,29 @@
   }
 
   // Santa's speaker: a Chromecast one HQ keeps a link to, or the Pi's own output when none is named.
+  // Santa plays this far above the speaker's volume, within its limits (as SantaLoudness.LevelFor on HQ).
+  let speakerInfo = null;
+  const santaLevel = (sp, above) => sp.state.volume >= sp.max ? sp.state.volume
+    : Math.min(sp.max, Math.max(sp.min, sp.state.volume + above));
+  const pct = v => Math.round(v * 100) + '%';
+  // Says where Santa lands, and whether the ceiling holds him back, so a slider move that changes nothing makes sense.
+  const santaLine = (sp, above) => {
+    const level = santaLevel(sp, above), held = sp.state.volume < sp.max && sp.state.volume + above > sp.max;
+    return `Santa plays at <b>${pct(level)}</b>: the volume + ${Math.round(above * 100)}` +
+      (held ? `, held at the ${pct(sp.max)} ceiling.` : `, between ${pct(sp.min)} and ${pct(sp.max)}.`);
+  };
+
   function renderSpeaker(sp) {
-    const s = sp.state, now = Date.parse(sp.now), pct = v => Math.round(v * 100) + '%';
+    const s = sp.state, now = Date.parse(sp.now);
+    speakerInfo = sp;
     clocks.speaker = null;
     $('speakerConnect').disabled = !s.configured || s.connected;
     $('speakerDisconnect').disabled = !s.connected;
+    const loud = $('loudness');
+    loud.disabled = !s.configured;
+    loud.max = Math.round(sp.mostAbove * 100);
+    if (document.activeElement !== loud) loud.value = Math.round(sp.above * 100);
+    $('loudnessOut').textContent = loud.value;
     if (!s.configured) {
       $('speakerStatus').innerHTML = '<span class="pill">The Pi\'s own output</span>' +
         '<div class="muted" style="margin-top:6px">No Chromecast speaker is named (Voice:CastTo), so Santa plays on the Pi.</div>';
@@ -214,7 +239,7 @@
     if (s.connected && s.playing) pills.push(`<span class="pill">Playing ${esc(s.playing)}</span>`);
     const lines = [esc(s.name) + (s.address && s.address !== s.name ? ' · ' + esc(s.address) : '')];
     if (s.connected && sp.santaVolume != null)
-      lines.push(`Santa plays at ${pct(sp.santaVolume)}: the volume + ${Math.round(sp.above * 100)}, between ${pct(sp.min)} and ${pct(sp.max)}.`);
+      lines.push(`<span id="santaLine">${santaLine(sp, sp.above)}</span>`);
     if (!s.connected) lines.push(s.wanted
       ? 'HQ keeps looking. If it doesn\'t answer when Santa speaks, he plays on the Pi instead.'
       : 'Santa plays on the Pi\'s own output until Connect.');
@@ -229,6 +254,20 @@
     };
     tick();
   }
+
+  // The loudness slider: shows Santa's level as it moves, and saves it on HQ when let go.
+  $('loudness').addEventListener('input', e => {
+    const above = +e.target.value;
+    $('loudnessOut').textContent = above;
+    if ($('santaLine') && speakerInfo?.state.volume != null) $('santaLine').innerHTML = santaLine(speakerInfo, above / 100);
+  });
+  $('loudness').addEventListener('change', async e => {
+    try {
+      await api('/speaker/loudness?above=' + (+e.target.value / 100), { method: 'POST' });
+      $('voiceNote').textContent = "Saved. Press Test Santa's voice to hear it.";
+      refreshLive();
+    } catch (err) { if (err.message !== 'login') console.error(err); }
+  });
 
   // The train driver: only between mail runs, and only once the hub is awake. Stop always works.
   let trainState = null;
@@ -316,7 +355,7 @@
         b.disabled = true;
         $('voiceNote').textContent = 'Santa is speaking…';
         try {
-          const res = await api('/voice/test', { method: 'POST' });
+          const res = await api('/voice/test', { method: 'POST', body: JSON.stringify({ text: $('voiceText').value }) });
           $('voiceNote').textContent = res.ok
             ? `Santa spoke on ${(await res.json()).speaker}.`
             : 'Santa couldn\'t speak: is Piper running?';

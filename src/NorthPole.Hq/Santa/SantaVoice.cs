@@ -86,11 +86,28 @@ public sealed class SantaVoice(IOptions<HqOptions> options, HttpClient http, Cas
         }
     }
 
-    /// <summary>The dashboard's speaker check: Santa says a short line on the station speaker.</summary>
-    public async Task<string?> TestStationAsync(CancellationToken ct)
+    /// <summary>The longest line an elf can give Santa to test with, so a slip can't keep Piper busy for minutes.</summary>
+    public const int LongestTestLine = 300;
+
+    /// <summary>
+    /// The dashboard's speaker check: Santa says <paramref name="text"/>, or his usual test line when it's empty, on the
+    /// station speaker. Each test has a file of its own, gone once it has played.
+    /// </summary>
+    public async Task<string?> TestStationAsync(string? text, CancellationToken ct)
     {
-        var file = await SynthesizeAsync("speaker-test.wav", TestLine, ct);
-        return file is null ? null : await PlayOnStationAsync(file, ct);
+        var line = string.IsNullOrWhiteSpace(text) ? TestLine : text.Trim();
+        if (line.Length > LongestTestLine) line = line[..LongestTestLine];
+        var file = await SynthesizeAsync($"speaker-test-{Guid.NewGuid():N}.wav", line, ct);
+        if (file is null) return null;
+        try
+        {
+            return await PlayOnStationAsync(file, ct);
+        }
+        finally
+        {
+            try { File.Delete(PathOf(file)!); }
+            catch (IOException) { } // still open somewhere: a leftover test file does no harm
+        }
     }
 
     async Task PlayAsync(string file, CancellationToken ct)
