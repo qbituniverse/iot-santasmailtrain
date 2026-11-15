@@ -69,8 +69,8 @@ public sealed record TrainState(
     bool Listening = false);
 
 /// <summary>
-/// Stop brakes and ends the mail run in progress. Drive is the dashboard's train driver: it sets the motor to
-/// <see cref="TrainCommand.Speed"/> (0 brakes), and only between mail runs. Disconnect stops the train, lets the hub go
+/// Stop brakes and ends the mail run in progress. Drive is the train driver: it sets the motor to
+/// <see cref="TrainCommand.Speed"/> (above 0 forward, below 0 in reverse, 0 brakes), and only between mail runs. Disconnect stops the train, lets the hub go
 /// and stops looking for it; Connect looks for it again, so the hub's green button connects it.
 /// </summary>
 public enum TrainCommandKind { Stop, TestRun, LightsOn, LightsOff, Whistle, Drive, Connect, Disconnect }

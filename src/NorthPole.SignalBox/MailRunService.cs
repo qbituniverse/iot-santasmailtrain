@@ -124,14 +124,21 @@ public sealed class MailRunService : BackgroundService
                     _log.LogWarning("Train driver ignored: the LEGO hub isn't connected");
                     break;
                 }
-                if (cmd.Speed is not (> 0 and var speed))
+                if (cmd.Speed is not (not 0 and int speed))
                 {
                     await SafeBrakeAsync();
                 }
                 else
                 {
-                    _log.LogInformation("Train driver: speed {Speed}", speed);
-                    await SetSpeedAsync(speed, ct); // capped at MaxSpeed, like every other speed
+                    if (_speed != 0 && Math.Sign(speed) != Math.Sign(_speed))
+                    {
+                        // The other way: stop first, so the motor isn't thrown into reverse at speed, and the coaches
+                        // it pushes stay on the rails.
+                        await SafeBrakeAsync();
+                        await Task.Delay(TimeSpan.FromMilliseconds(600), ct);
+                    }
+                    _log.LogInformation("Train driver: {Direction} at {Speed}", speed > 0 ? "forward" : "reverse", Math.Abs(speed));
+                    await SetSpeedAsync(speed, ct); // capped at MaxSpeed either way, like every other speed
                 }
                 await PublishStateAsync();
                 break;

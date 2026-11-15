@@ -1,6 +1,7 @@
 // The mail train panel, shared by the elves' workshop (/elves) and the train driver's page (/driver): the hub's link and
-// battery, Connect and Disconnect, and the driver's Start, Stop, speed and lights. Each page passes its own API, and
-// the panel's buttons say what they do with data-cmd (a train command) or data-drive (Start at the slider's speed).
+// battery, Connect and Disconnect, and the driver's Forward, Reverse, Stop, speed and lights. Each page passes its own
+// API, and the panel's buttons say what they do with data-cmd (a train command) or data-drive ("forward" or "reverse",
+// at the slider's speed).
 (() => {
   // The signal box publishes every 10 s and on every change; a state older than this means it has gone quiet.
   const QuietAfterMs = 30000;
@@ -48,7 +49,7 @@
       const awake = s.hubConnected && !quiet;
       const low = s.batteryPercent != null && s.batteryPercent < s.lowBatteryPercent;
       const battery = (s.batteryPercent == null ? '?' : s.batteryPercent + '%') + (s.batteryVolts == null ? '' : ` · ${s.batteryVolts.toFixed(1)} V`);
-      const doing = s.busy ? 'On a run' : s.speed ? `Driving at ${s.speed}` : 'Waiting';
+      const doing = s.busy ? 'On a run' : s.speed > 0 ? `Forward at ${s.speed}` : s.speed < 0 ? `Reverse at ${-s.speed}` : 'Waiting';
       const link = quiet ? '<span class="pill bad">Signal box quiet</span>'
         : awake ? '<span class="pill ok">Connected <span id="uptime"></span></span>'
         : s.listening ? '<span class="pill">Listening for the train</span>'
@@ -81,10 +82,11 @@
       const max = s?.maxSpeed || 70; // an older signal box doesn't say: its default cap
       slider.max = max;
       $('speedMax').textContent = max;
-      if (s?.speed > 0 && !s.busy && document.activeElement !== slider) slider.value = s.speed;
+      if (s?.speed && !s.busy && document.activeElement !== slider) slider.value = Math.abs(s.speed);
       if (+slider.value > max) slider.value = max;
       $('speedOut').textContent = slider.value;
-      slider.disabled = $('driveStart').disabled = !canDrive;
+      slider.disabled = !canDrive;
+      root.querySelectorAll('[data-drive]').forEach(b => b.disabled = !canDrive);
       root.querySelectorAll('.driver [data-cmd^="Lights"]').forEach(b => b.disabled = !awake);
       $('disconnect').disabled = !awake;
       $('connect').disabled = !s || awake;
@@ -103,19 +105,20 @@
       if (!b || !root.contains(b)) return;
       try {
         if (b.dataset.cmd) await send(b.dataset.cmd);
-        else if (b.dataset.drive !== undefined) {
+        else if (b.dataset.drive) {
           const speed = +$('speed').value;
           if (speed === 0) $('driverNote').textContent = 'Set a speed above 0 first.';
-          else await send('Drive', '?speed=' + speed);
+          else await send('Drive', '?speed=' + (b.dataset.drive === 'reverse' ? -speed : speed));
         }
       } catch (err) { onError(err); }
     });
 
-    // While the train moves, letting go of the slider changes its speed; standing still, Start sends it.
+    // While the train moves, letting go of the slider changes its speed the way it's going; standing still, Forward or
+    // Reverse sends it.
     $('speed').addEventListener('input', e => { $('speedOut').textContent = e.target.value; });
     $('speed').addEventListener('change', async e => {
-      if (!(state?.speed > 0) || state.busy) return;
-      try { await send('Drive', '?speed=' + +e.target.value); } catch (err) { onError(err); }
+      if (!state?.speed || state.busy) return;
+      try { await send('Drive', '?speed=' + Math.sign(state.speed) * +e.target.value); } catch (err) { onError(err); }
     });
 
     return { render };

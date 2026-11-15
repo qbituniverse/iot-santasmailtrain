@@ -318,10 +318,10 @@ app.Run();
 static object TrainStatus(MailTrainClient train, MqttLink mqtt) =>
     new { mqttConnected = mqtt.IsConnected, online = train.TrainLooksOnline, state = train.State, now = DateTimeOffset.Now };
 
-// The driver sends Drive with ?speed=0..100; the signal box caps it at its MaxSpeed.
+// The driver sends Drive with ?speed=-100..100 (below 0 in reverse); the signal box caps it at its MaxSpeed.
 static async Task<IResult> SendTrainCommand(TrainCommandKind command, int? speed, MailTrainClient train) =>
-    command == TrainCommandKind.Drive && speed is not (>= 0 and <= 100)
-        ? Results.BadRequest("Drive needs a speed from 0 to 100")
+    command == TrainCommandKind.Drive && speed is not (>= -100 and <= 100)
+        ? Results.BadRequest("Drive needs a speed from -100 to 100")
         : await train.SendCommandAsync(command, command == TrainCommandKind.Drive ? speed : null)
             ? Results.Ok()
             : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);

@@ -41,8 +41,9 @@
         <section class="driver" aria-labelledby="driverTitle">
           <h3 id="driverTitle">Train driver</h3>
           <div class="actions">
-            <button class="btn go" id="driveStart" data-drive>Start</button>
+            <button class="btn go" data-drive="reverse">&larr; Reverse</button>
             <button class="btn" data-cmd="Stop">Stop</button>
+            <button class="btn go" data-drive="forward">Forward &rarr;</button>
           </div>
           <label class="speed" for="speed">
             <span>Speed <output id="speedOut" for="speed">30</output> of <span id="speedMax">70</span></span>
