@@ -44,6 +44,12 @@ public sealed class TrainOptions
 
     /// <summary>Refuse new mail runs below this battery level.</summary>
     public int LowBatteryPercent { get; set; } = 15;
+
+    /// <summary>
+    /// Standby: after this many minutes with nothing happening, let the hub go so it switches itself off and saves its
+    /// batteries (it draws about 70 mA just waiting). 0 never does. The dashboard's slider overrides it.
+    /// </summary>
+    public int IdleMinutes { get; set; } = 5;
 }
 
 public enum TracksideMode { Simulated, Gpio }

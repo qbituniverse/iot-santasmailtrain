@@ -276,6 +276,7 @@ The signal box holds no secrets. Its defaults match the wiring above.
 | `Train:MotorPort`, `Train:LightPort`, `Train:ReverseDirection` | `0`, `1`, `false` | The hub's ports (A = 0); flip the direction if the train drives backwards. |
 | `Train:CruiseSpeed`, `Train:ApproachSpeed`, `Train:MaxSpeed` | `45`, `25`, `70` | Speeds in percent; `MaxSpeed` caps whatever is asked for. |
 | `Train:LowBatteryPercent` | `15` | Below this, runs are refused and Rudolph flies. |
+| `Train:IdleMinutes` | `5` | Standby: with nothing happening this long, the hub is let go to save its batteries. The dashboard's slider overrides it; 0 never. |
 | `Trackside:Mode` | `Gpio` (from `appsettings.Pi.json`) | `Gpio` or `Simulated`. |
 | `Trackside:NorthPoleSensor` | `Magnet` on GPIO17, `ActiveLow: true` | The North Pole sensor. |
 | `Trackside:HomeSensor` | `Ultrasonic`: Echo GPIO27, Trig GPIO22, within 8 cm | The mailbox sensor. |
@@ -388,6 +389,7 @@ Set `Santa:Language` (for example, "Polish"), download a matching [Piper voice](
 **For grown-ups**
 
 - Each morning, park the train at the mailbox and press its green button. Swap the six AAA batteries when the dashboard shows them low.
+- **Standby.** A connected hub draws about 70 mA just waiting, which empties six AAA cells in about half a day, so after 5 minutes with nothing happening the signal box lets it go and it switches itself off. Letters then go with Rudolph until someone presses **Connect** (and the hub's green button if its light is off). Santa's speaker link sleeps the same way, but Santa still plays on the speaker, which wakes it. A slider for each on the dashboard sets the minutes, up to 30, or 0 for never; HQ keeps them in `data/standby.json`.
 - The dashboard (`http://np.local/elves`) has the train's status (how long the hub has been connected, its battery in percent and volts, and how fresh the news is, updated every few seconds), **Connect** and **Disconnect** for the train's hub, **Test run** and **Stop run**, a **Train driver** (Forward, Reverse and Stop, a speed slider in steps of 10 up to `MaxSpeed`, and the lights); **Santa's speaker** (a Chromecast one's link and how long it has held, its volume and Santa's, **Connect** and **Disconnect**, a slider for **Santa's loudness**, and **Test Santa's voice**, with a box for your own words); each child's **Extra wish today**; the shopping list; and every letter with its mood and Santa's reply. A worried or sad letter shows as an alert at the top.
 - **The Train Driver card** on **QR cards & LEGO plans** opens `http://np.local/driver`: the train's status, **Connect** and **Disconnect**, and the driver's Forward, Reverse, Stop, speed and lights, with no PIN and no Test run. Anyone on the home Wi-Fi with the card can drive; the signal box keeps its speed cap, won't drive during a mail run, and brakes if HQ goes quiet. **Stop** works there too, and ends a mail run as it does on the dashboard.
 - **Lost card?** On **QR cards & LEGO plans**, click **Lost this card? Make a new code** under it. The old card and its LEGO mosaic stop working at once, and the new card is ready to print.

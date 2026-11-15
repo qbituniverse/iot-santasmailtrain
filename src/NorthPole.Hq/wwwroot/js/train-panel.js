@@ -53,10 +53,15 @@
       const link = quiet ? '<span class="pill bad">Signal box quiet</span>'
         : awake ? '<span class="pill ok">Connected <span id="uptime"></span></span>'
         : s.listening ? '<span class="pill">Listening for the train</span>'
+        : s.asleep ? '<span class="pill">Asleep</span>'
         : '<span class="pill bad">Disconnected</span>';
-      const hint = quiet || awake ? ''
+      const sleepsIn = awake && s.sleepAt ? Math.max(1, Math.ceil((Date.parse(s.sleepAt) - now) / 60000)) : null;
+      const hint = quiet ? ''
+        : awake ? (sleepsIn ? `Sleeps in about ${sleepsIn} min if nothing happens, to save its batteries.` : '')
         // A flashing hub is already waiting to be found; another press of its button would switch it off.
         : s.listening ? 'If the light on the train\'s hub isn\'t flashing, press its green button.'
+        : s.asleep ? `It went to sleep after ${s.idleMinutes} min with nothing happening, to save its batteries. ` +
+          'Press Connect to wake it, and the hub\'s green button if its light is off.'
         : 'Press Connect to look for the train again, and the hub\'s green button if its light isn\'t flashing.';
       $('trainStatus').innerHTML =
         `${link} <span class="pill ${low ? 'bad' : ''}">Battery ${esc(battery)}</span> <span class="pill">${esc(doing)}</span>` +

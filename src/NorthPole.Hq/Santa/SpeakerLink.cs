@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
+using NorthPole.Hq.Mail;
 
 namespace NorthPole.Hq.Santa;
 
@@ -8,16 +9,20 @@ namespace NorthPole.Hq.Santa;
 /// <param name="Wanted">False after an elf pressed Disconnect: Santa plays on the Pi's own output until Connect.</param>
 /// <param name="Playing">What the speaker is casting, by name, if anything (Santa shows as the Default Media Receiver).</param>
 /// <param name="At">When the speaker last reported, so the dashboard can tell a fresh volume from an old one.</param>
+/// <param name="Asleep">The link went to sleep after the standby time; Santa still plays on the speaker, which wakes it.</param>
+/// <param name="SleepAt">When the link will sleep if nothing happens before then.</param>
 public sealed record SpeakerState(bool Configured, string? Name, bool Wanted, bool Connected, string? Address,
-    DateTimeOffset? ConnectedSince, double? Volume, bool? Muted, string? Playing, DateTimeOffset? At);
+    DateTimeOffset? ConnectedSince, double? Volume, bool? Muted, string? Playing, DateTimeOffset? At,
+    bool Asleep = false, DateTimeOffset? SleepAt = null);
 
 /// <summary>
 /// HQ's standing link to the Chromecast speaker named in Voice:CastTo, for the dashboard: whether it answers and since
 /// when, its volume and what it's playing. It connects from start-up and keeps trying while the speaker is away.
-/// Disconnect closes the link and keeps Santa off the speaker until Connect. Santa's own casts open connections of
+/// Disconnect closes the link and keeps Santa off the speaker until Connect. After the standby time with nothing
+/// happening the link sleeps instead: Santa still plays on the speaker, and that, or Connect, wakes it. Santa's own casts open connections of
 /// their own (<see cref="CastSpeaker"/>), and find the speaker's address here.
 /// </summary>
-public sealed class SpeakerLink(IOptions<HqOptions> options, ILogger<SpeakerLink> log) : BackgroundService
+public sealed class SpeakerLink(IOptions<HqOptions> options, StandbySettings standby, ILogger<SpeakerLink> log) : BackgroundService
 {
     static readonly TimeSpan Poll = TimeSpan.FromSeconds(10);    // ask for its status this often
     static readonly TimeSpan Silence = TimeSpan.FromSeconds(30); // it pings every 5 s: this long without a word, it's gone
@@ -30,6 +35,8 @@ public sealed class SpeakerLink(IOptions<HqOptions> options, ILogger<SpeakerLink
     volatile bool _wanted = true;
     bool _complained; // said once that it isn't answering: don't repeat it every 15 s
     long _heard;      // Environment.TickCount64 of its last message
+    long _lastActivity = Environment.TickCount64; // Santa played, a test, a Connect, or the link opened
+    volatile bool _asleep; // the standby closed the link; Santa still plays on the speaker
 
     IPAddress? _address;
     bool _connected;
@@ -47,7 +54,7 @@ public sealed class SpeakerLink(IOptions<HqOptions> options, ILogger<SpeakerLink
         {
             lock (_lock)
                 return new(Configured, _o.CastTo, _wanted, _connected, _address?.ToString(), _connected ? _since : null,
-                    _volume, _muted, _playing, _at);
+                    _volume, _muted, _playing, _at, _asleep, _connected ? SleepAt() : null);
         }
     }
 
@@ -55,14 +62,39 @@ public sealed class SpeakerLink(IOptions<HqOptions> options, ILogger<SpeakerLink
     {
         log.LogInformation("Connect to Santa's speaker from the dashboard");
         _wanted = true;
+        _asleep = false;
+        Touch();
         try { _wake.Release(); }
         catch (SemaphoreFullException) { } // already woken
+    }
+
+    /// <summary>Something used the speaker: the standby counts from now.</summary>
+    public void Touch() => Volatile.Write(ref _lastActivity, Environment.TickCount64);
+
+    /// <summary>Santa played on the speaker: open the link again if it was asleep.</summary>
+    public void WakeUp()
+    {
+        Touch();
+        if (!_asleep) return;
+        _asleep = false;
+        log.LogInformation("Santa's speaker link wakes up");
+        try { _wake.Release(); }
+        catch (SemaphoreFullException) { }
+    }
+
+    DateTimeOffset? SleepAt()
+    {
+        var minutes = standby.SpeakerIdleMinutes;
+        if (minutes == 0) return null;
+        var left = minutes * 60_000L - (Environment.TickCount64 - Volatile.Read(ref _lastActivity));
+        return DateTimeOffset.Now.AddMilliseconds(Math.Max(0, left));
     }
 
     public void Disconnect()
     {
         log.LogInformation("Disconnect from Santa's speaker from the dashboard: Santa plays on the Pi until Connect");
         _wanted = false;
+        _asleep = false;
         try { _link?.Cancel(); }
         catch (ObjectDisposedException) { } // the link had just ended
     }
@@ -90,7 +122,7 @@ public sealed class SpeakerLink(IOptions<HqOptions> options, ILogger<SpeakerLink
         await Task.Yield(); // not on the host's start-up path
         while (!stop.IsCancellationRequested)
         {
-            if (_wanted)
+            if (_wanted && !_asleep)
             {
                 try
                 {
@@ -141,6 +173,7 @@ public sealed class SpeakerLink(IOptions<HqOptions> options, ILogger<SpeakerLink
             }, link.Token);
 
             lock (_lock) (_connected, _since) = (true, DateTimeOffset.Now);
+            Touch();
             _complained = false;
             log.LogInformation("Connected to Santa's speaker '{Name}' at {Address}", _o.CastTo, address);
             try
@@ -152,6 +185,13 @@ public sealed class SpeakerLink(IOptions<HqOptions> options, ILogger<SpeakerLink
                     link.Token.ThrowIfCancellationRequested();
                     if (Environment.TickCount64 - Volatile.Read(ref _heard) > Silence.TotalMilliseconds)
                         throw new TimeoutException("it stopped answering");
+                    if (standby.SpeakerIdleMinutes is > 0 and var minutes
+                        && Environment.TickCount64 - Volatile.Read(ref _lastActivity) >= minutes * 60_000L)
+                    {
+                        _asleep = true;
+                        log.LogInformation("Santa's speaker link sleeps after {Minutes} min with nothing happening; Santa still plays on it", minutes);
+                        return;
+                    }
                 }
             }
             finally

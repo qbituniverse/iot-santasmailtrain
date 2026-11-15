@@ -34,6 +34,10 @@
           <button class="btn secondary" id="connect" data-cmd="Connect" disabled>Connect</button>
           <button class="btn secondary" id="disconnect" data-cmd="Disconnect" disabled>Disconnect</button>
         </div>
+        <label class="speed" for="trainStandby">
+          <span>Standby: the train sleeps after <output id="trainStandbyOut" for="trainStandby">5 min</output> idle</span>
+          <input type="range" id="trainStandby" min="0" max="30" step="1" value="5">
+        </label>
         <div class="actions">
           <button class="btn go" data-cmd="TestRun">Test run</button>
           <button class="btn" data-cmd="Stop">Stop run</button>
@@ -63,6 +67,10 @@
           <button class="btn secondary" id="speakerConnect" disabled>Connect</button>
           <button class="btn secondary" id="speakerDisconnect" disabled>Disconnect</button>
         </div>
+        <label class="speed" for="speakerStandby">
+          <span>Standby: the link sleeps after <output id="speakerStandbyOut" for="speakerStandby">5 min</output> idle</span>
+          <input type="range" id="speakerStandby" min="0" max="30" step="1" value="5">
+        </label>
         <label class="speed" for="loudness">
           <span>Santa's loudness: the volume + <output id="loudnessOut" for="loudness">15</output></span>
           <input type="range" id="loudness" min="0" max="30" step="5" value="15" disabled>
@@ -127,6 +135,7 @@
       $('app').hidden = false;
       renderSummary(summary);
       panel.render(train);
+      showTrainStandby(train.idleMinutes);
       renderSpeaker(speaker);
       renderAlerts(wishes);
       renderShopping(wishes);
@@ -150,6 +159,24 @@
   });
   const speakerClock = NorthPole.clock();
 
+  // The standby sliders: minutes with nothing happening before the train, or the speaker's link, sleeps. 0 never.
+  const minutesText = m => +m === 0 ? 'never' : `${m} min`;
+  function standbySlider(id, path) {
+    const slider = $(id), out = $(id + 'Out');
+    slider.addEventListener('input', () => { out.textContent = minutesText(slider.value); });
+    slider.addEventListener('change', async () => {
+      try { await api(`${path}?minutes=${slider.value}`, { method: 'POST' }); refreshLive(); }
+      catch (err) { if (err.message !== 'login') console.error(err); }
+    });
+    return minutes => {
+      if (minutes == null) return;
+      if (document.activeElement !== slider) slider.value = minutes;
+      out.textContent = minutesText(slider.value);
+    };
+  }
+  const showTrainStandby = standbySlider('trainStandby', '/train/standby');
+  const showSpeakerStandby = standbySlider('speakerStandby', '/speaker/standby');
+
   // Santa's speaker: a Chromecast one HQ keeps a link to, or the Pi's own output when none is named.
   // Santa plays this far above the speaker's volume, within its limits (as SantaLoudness.LevelFor on HQ).
   let speakerInfo = null;
@@ -166,6 +193,7 @@
   function renderSpeaker(sp) {
     const s = sp.state, now = Date.parse(sp.now);
     speakerInfo = sp;
+    showSpeakerStandby(sp.idleMinutes);
     speakerClock.set(null);
     $('speakerConnect').disabled = !s.configured || s.connected;
     $('speakerDisconnect').disabled = !s.connected;
@@ -180,17 +208,22 @@
       return;
     }
     const pills = [s.connected ? '<span class="pill ok">Connected <span id="spUptime"></span></span>'
-      : s.wanted ? '<span class="pill">Looking for it</span>'
-      : '<span class="pill bad">Disconnected</span>'];
+      : !s.wanted ? '<span class="pill bad">Disconnected</span>'
+      : s.asleep ? '<span class="pill">Asleep</span>'
+      : '<span class="pill">Looking for it</span>'];
     if (s.connected && s.volume != null) pills.push(`<span class="pill">Volume ${pct(s.volume)}</span>`);
     if (s.connected && s.muted) pills.push('<span class="pill bad">Muted</span>');
     if (s.connected && s.playing) pills.push(`<span class="pill">Playing ${esc(s.playing)}</span>`);
     const lines = [esc(s.name) + (s.address && s.address !== s.name ? ' · ' + esc(s.address) : '')];
     if (s.connected && sp.santaVolume != null)
       lines.push(`<span id="santaLine">${santaLine(sp, sp.above)}</span>`);
-    if (!s.connected) lines.push(s.wanted
-      ? 'HQ keeps looking. If it doesn\'t answer when Santa speaks, he plays on the Pi instead.'
-      : 'Santa plays on the Pi\'s own output until Connect.');
+    const sleepsIn = s.connected && s.sleepAt ? Math.max(1, Math.ceil((Date.parse(s.sleepAt) - now) / 60000)) : null;
+    if (sleepsIn) lines.push(`The link sleeps in about ${sleepsIn} min if nothing happens; Santa still plays on it.`);
+    if (!s.connected) lines.push(!s.wanted
+      ? 'Santa plays on the Pi\'s own output until Connect.'
+      : s.asleep ? `The link went to sleep after ${sp.idleMinutes} min with nothing happening. Santa still plays on the ` +
+        'speaker, and that wakes it; Connect wakes it now.'
+      : 'HQ keeps looking. If it doesn\'t answer when Santa speaks, he plays on the Pi instead.');
     if (s.connected && s.at) lines.push('<span>updated <span id="spHeard"></span> ago</span>');
     $('speakerStatus').innerHTML = pills.join(' ') + lines.map(l => `<div class="muted" style="margin-top:6px">${l}</div>`).join('');
     if (s.connected) speakerClock.set({
@@ -282,6 +315,7 @@
     try {
       const [train, speaker] = await Promise.all([api('/train').then(r => r.json()), api('/speaker').then(r => r.json())]);
       panel.render(train);
+      showTrainStandby(train.idleMinutes);
       renderSpeaker(speaker);
     }
     catch (e) { if (e.message !== 'login') console.error(e); }

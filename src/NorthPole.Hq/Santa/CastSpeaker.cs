@@ -37,6 +37,7 @@ public sealed class CastSpeaker(IOptions<HqOptions> options, SpeakerLink link, S
     public async Task<bool> PlayAsync(IReadOnlyList<string> files, CancellationToken ct)
     {
         if (!Enabled || files.Count == 0) return false;
+        link.Touch();
         for (var attempt = 1; attempt <= 2; attempt++)
         {
             IPAddress? address = null;
@@ -49,6 +50,7 @@ public sealed class CastSpeaker(IOptions<HqOptions> options, SpeakerLink link, S
                     return false;
                 }
                 await PlayOnAsync(address, files, ct);
+                link.WakeUp(); // a sleeping link opens again, and the standby counts from now
                 return true;
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

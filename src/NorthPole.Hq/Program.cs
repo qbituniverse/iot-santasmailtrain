@@ -57,6 +57,8 @@ builder.Services.AddSingleton<WishStore>();
 builder.Services.AddSingleton<FamilyService>();
 builder.Services.AddSingleton<QrCards>();
 builder.Services.AddSingleton<MailTrainClient>();
+builder.Services.AddSingleton<StandbySettings>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<StandbySettings>());
 builder.Services.AddSingleton<WishPipeline>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<WishPipeline>());
 
@@ -232,7 +234,7 @@ elves.MapPost("/wishes/{id:guid}/replay", (Guid id, WishStore store, SantaVoice 
 });
 
 // Santa's speaker, when it's a Chromecast one: its link, volume and Santa's level, with the Pi's clock for the timers.
-elves.MapGet("/speaker", (SpeakerLink link, SantaLoudness loudness) =>
+elves.MapGet("/speaker", (SpeakerLink link, SantaLoudness loudness, StandbySettings standby) =>
 {
     var state = link.State;
     return new
@@ -241,6 +243,7 @@ elves.MapGet("/speaker", (SpeakerLink link, SantaLoudness loudness) =>
         santaVolume = state.Volume is { } level ? loudness.LevelFor(level) : (double?)null,
         above = loudness.Above,
         mostAbove = SantaLoudness.MostAbove,
+        idleMinutes = standby.SpeakerIdleMinutes,
         min = loudness.Min,
         max = loudness.Max,
         now = DateTimeOffset.Now,
@@ -248,6 +251,20 @@ elves.MapGet("/speaker", (SpeakerLink link, SantaLoudness loudness) =>
 });
 elves.MapPost("/speaker/connect", (SpeakerLink link) => { link.Connect(); return Results.Ok(); });
 elves.MapPost("/speaker/disconnect", (SpeakerLink link) => { link.Disconnect(); return Results.Ok(); });
+
+// The standby sliders: minutes with nothing happening before the train, or the speaker's link, sleeps. 0 never.
+elves.MapPost("/speaker/standby", (int minutes, StandbySettings standby) =>
+{
+    if (minutes is < 0 or > StandbySettings.MostMinutes) return Results.BadRequest($"minutes must be 0 to {StandbySettings.MostMinutes}");
+    standby.SetSpeaker(minutes);
+    return Results.Ok();
+});
+elves.MapPost("/train/standby", async (int minutes, StandbySettings standby) =>
+{
+    if (minutes is < 0 or > StandbySettings.MostMinutes) return Results.BadRequest($"minutes must be 0 to {StandbySettings.MostMinutes}");
+    await standby.SetTrainAsync(minutes);
+    return Results.Ok();
+});
 
 // The dashboard's loudness slider: Santa plays this far above the speaker's volume, 0 to 0.3.
 elves.MapPost("/speaker/loudness", (double above, SantaLoudness loudness) =>
@@ -315,8 +332,13 @@ elves.MapGet("/summary", (WishStore store, FamilyService family) =>
 app.Run();
 
 // now: the Pi's clock, so a page can time the hub's connection and spot an old state whatever the phone's clock says.
-static object TrainStatus(MailTrainClient train, MqttLink mqtt) =>
-    new { mqttConnected = mqtt.IsConnected, online = train.TrainLooksOnline, state = train.State, now = DateTimeOffset.Now };
+// idleMinutes: the train's standby as saved here; the state says what the signal box is using.
+static object TrainStatus(MailTrainClient train, MqttLink mqtt, StandbySettings standby) =>
+    new
+    {
+        mqttConnected = mqtt.IsConnected, online = train.TrainLooksOnline, state = train.State, now = DateTimeOffset.Now,
+        idleMinutes = standby.TrainIdleMinutes,
+    };
 
 // The driver sends Drive with ?speed=-100..100 (below 0 in reverse); the signal box caps it at its MaxSpeed.
 static async Task<IResult> SendTrainCommand(TrainCommandKind command, int? speed, MailTrainClient train) =>
