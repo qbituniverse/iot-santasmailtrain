@@ -18,17 +18,16 @@ namespace NorthPole.Hq.Santa;
 /// so nothing goes to the internet. Santa plays above the speaker's current volume (the TV's), within limits, and the
 /// volume goes back afterwards. A cast that starts while the TV plays cuts in, and the TV comes back by itself.
 /// </summary>
-public sealed class CastSpeaker(IOptions<HqOptions> options, IServer server, ILogger<CastSpeaker> log)
+public sealed class CastSpeaker(IOptions<HqOptions> options, SpeakerLink link, IServer server, ILogger<CastSpeaker> log)
 {
-    const int CastPort = 8009;
     const string MediaReceiver = "CC1AD845"; // Google's Default Media Receiver
     static readonly TimeSpan LongestFile = TimeSpan.FromMinutes(3);
 
     readonly VoiceOptions _o = options.Value.Voice;
     readonly ConcurrentDictionary<string, string> _shared = new();
-    IPAddress? _address; // found once, looked for again if it stops answering
 
-    public bool Enabled => !string.IsNullOrWhiteSpace(_o.CastTo);
+    /// <summary>A speaker is named, and no elf has pressed Disconnect.</summary>
+    public bool Enabled => link.Configured && link.Wanted;
 
     /// <summary>The file shared under <paramref name="token"/>, while it plays.</summary>
     public string? PathFor(string token) => _shared.TryGetValue(Path.GetFileNameWithoutExtension(token), out var path) ? path : null;
@@ -39,21 +38,22 @@ public sealed class CastSpeaker(IOptions<HqOptions> options, IServer server, ILo
         if (!Enabled || files.Count == 0) return false;
         for (var attempt = 1; attempt <= 2; attempt++)
         {
+            IPAddress? address = null;
             try
             {
-                _address ??= await FindAsync(ct);
-                if (_address is null)
+                address = await link.ResolveAsync(ct);
+                if (address is null)
                 {
                     log.LogWarning("No Chromecast speaker called '{Name}' answered on the network", _o.CastTo);
                     return false;
                 }
-                await PlayOnAsync(_address, files, ct);
+                await PlayOnAsync(address, files, ct);
                 return true;
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                log.LogWarning("Santa couldn't play on '{Name}' ({Address}): {Message}", _o.CastTo, _address, ex.Message);
-                _address = null; // its address may have changed: look for it again
+                log.LogWarning("Santa couldn't play on '{Name}' ({Address}): {Message}", _o.CastTo, address, ex.Message);
+                link.Forget(); // its address may have changed: look for it again
             }
         }
         return false;
@@ -61,18 +61,9 @@ public sealed class CastSpeaker(IOptions<HqOptions> options, IServer server, ILo
 
     async Task PlayOnAsync(IPAddress address, IReadOnlyList<string> files, CancellationToken ct)
     {
-        using var tcp = new TcpClient();
-        using (var connect = CancellationTokenSource.CreateLinkedTokenSource(ct))
-        {
-            connect.CancelAfter(TimeSpan.FromSeconds(8));
-            await tcp.ConnectAsync(address, CastPort, connect.Token);
-        }
-        // Cast devices present a certificate of their own making: on the home network there's nothing to check it against.
-        await using var tls = new SslStream(tcp.GetStream(), false, (_, _, _, _) => true);
-        await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = address.ToString() }, ct);
-        var cast = new CastChannel(tls);
-        var here = ((IPEndPoint)tcp.Client.LocalEndPoint!).Address; // the Pi's address on the speaker's network
-        if (here.IsIPv4MappedToIPv6) here = here.MapToIPv4(); // the socket is dual-mode: give the speaker plain 192.168…
+        await using var connection = await CastConnection.OpenAsync(address, ct);
+        var cast = connection.Channel;
+        var here = connection.LocalAddress;
 
         await cast.SendAsync("receiver-0", CastChannel.Connection, new JsonObject { ["type"] = "CONNECT" }, ct);
         var status = await cast.RequestAsync("receiver-0", CastChannel.Receiver, new JsonObject { ["type"] = "GET_STATUS" }, ct);
@@ -86,7 +77,7 @@ public sealed class CastSpeaker(IOptions<HqOptions> options, IServer server, ILo
         {
             if (before is { } level)
             {
-                var santa = Math.Round(level >= _o.CastVolumeMax ? level : Math.Clamp(level + _o.CastVolumeAbove, _o.CastVolumeMin, _o.CastVolumeMax), 2);
+                var santa = _o.SantaLevel(level);
                 await cast.RequestAsync("receiver-0", CastChannel.Receiver,
                     new JsonObject { ["type"] = "SET_VOLUME", ["volume"] = new JsonObject { ["level"] = santa } }, ct);
                 volumeSet = true;
@@ -183,21 +174,55 @@ public sealed class CastSpeaker(IOptions<HqOptions> options, IServer server, ILo
         }
         return 80;
     }
+}
 
-    /// <summary>The speaker named in CastTo: an IP address as it is, or a name looked for on the network.</summary>
-    async Task<IPAddress?> FindAsync(CancellationToken ct)
+/// <summary>A TLS connection to a Cast device, with its <see cref="CastChannel"/>.</summary>
+sealed class CastConnection : IAsyncDisposable
+{
+    const int CastPort = 8009;
+
+    readonly TcpClient _tcp;
+    readonly SslStream _tls;
+
+    CastConnection(TcpClient tcp, SslStream tls)
     {
-        if (IPAddress.TryParse(_o.CastTo, out var given)) return given;
-        var found = await CastFinder.FindAsync(TimeSpan.FromSeconds(3), ct);
-        var match = found.FirstOrDefault(d => string.Equals(d.Name, _o.CastTo, StringComparison.OrdinalIgnoreCase));
-        if (match is null)
+        (_tcp, _tls) = (tcp, tls);
+        Channel = new CastChannel(tls);
+        var here = ((IPEndPoint)tcp.Client.LocalEndPoint!).Address;
+        LocalAddress = here.IsIPv4MappedToIPv6 ? here.MapToIPv4() : here; // dual-mode socket: give the speaker plain 192.168…
+    }
+
+    public CastChannel Channel { get; }
+
+    /// <summary>This machine's address on the device's network, for the device to fetch from.</summary>
+    public IPAddress LocalAddress { get; }
+
+    public static async Task<CastConnection> OpenAsync(IPAddress address, CancellationToken ct)
+    {
+        var tcp = new TcpClient();
+        try
         {
-            log.LogWarning("Chromecast speakers on the network: {Speakers}",
-                found.Count == 0 ? "none" : string.Join(", ", found.Select(d => $"'{d.Name}' ({d.Address})")));
-            return null;
+            using (var connect = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                connect.CancelAfter(TimeSpan.FromSeconds(8));
+                await tcp.ConnectAsync(address, CastPort, connect.Token);
+            }
+            // Cast devices present a certificate of their own making: on the home network there's nothing to check it against.
+            var tls = new SslStream(tcp.GetStream(), false, (_, _, _, _) => true);
+            await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = address.ToString() }, ct);
+            return new CastConnection(tcp, tls);
         }
-        log.LogInformation("Found '{Name}' at {Address}", match.Name, match.Address);
-        return match.Address;
+        catch
+        {
+            tcp.Dispose();
+            throw;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _tls.DisposeAsync();
+        _tcp.Dispose();
     }
 }
 
@@ -212,6 +237,7 @@ sealed class CastChannel(Stream stream)
     public const string Receiver = "urn:x-cast:com.google.cast.receiver";
     public const string Media = "urn:x-cast:com.google.cast.media";
 
+    readonly SemaphoreSlim _writing = new(1, 1); // a reader may answer a ping while a request goes out
     int _requestId;
 
     public async Task<int> SendAsync(string destination, string ns, JsonObject payload, CancellationToken ct)
@@ -228,9 +254,30 @@ sealed class CastChannel(Stream stream)
         var frame = new byte[4 + body.Length];
         BinaryPrimitives.WriteInt32BigEndian(frame, (int)body.Length);
         body.ToArray().CopyTo(frame, 4);
-        await stream.WriteAsync(frame, ct);
-        await stream.FlushAsync(ct);
+        await _writing.WaitAsync(ct);
+        try
+        {
+            await stream.WriteAsync(frame, ct);
+            await stream.FlushAsync(ct);
+        }
+        finally
+        {
+            _writing.Release();
+        }
         return id;
+    }
+
+    /// <summary>The next message that isn't a heartbeat ping (those are answered here). Waits as long as it takes.</summary>
+    public async Task<JsonNode> NextAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            var (source, ns, message) = await ReadAsync(ct);
+            if (ns == Heartbeat && message["type"]?.GetValue<string>() == "PING")
+                await SendAsync(source, Heartbeat, new JsonObject { ["type"] = "PONG" }, ct);
+            else
+                return message;
+        }
     }
 
     /// <summary>Sends, then waits for the reply that carries the same request id.</summary>

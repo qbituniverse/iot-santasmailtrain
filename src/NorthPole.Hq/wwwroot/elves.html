@@ -56,14 +56,22 @@
         </section>
       </section>
       <section class="panel">
-        <h2>This December</h2>
-        <div class="stat" id="wishCount">0</div>
-        <div class="muted">wishes sent · Claude spend <span id="spend">$0.00</span></div>
-        <div class="actions" id="childActions"></div>
+        <h2>Santa's speaker</h2>
+        <div id="speakerStatus" class="muted">Checking…</div>
+        <div class="actions">
+          <button class="btn secondary" id="speakerConnect" disabled>Connect</button>
+          <button class="btn secondary" id="speakerDisconnect" disabled>Disconnect</button>
+        </div>
         <div class="actions">
           <button class="btn secondary" id="voiceTest">Test Santa's voice</button>
         </div>
         <p class="muted" id="voiceNote" role="status"></p>
+      </section>
+      <section class="panel">
+        <h2>This December</h2>
+        <div class="stat" id="wishCount">0</div>
+        <div class="muted">wishes sent · Claude spend <span id="spend">$0.00</span></div>
+        <div class="actions" id="childActions"></div>
       </section>
       <section class="panel">
         <h2>Shopping list</h2>
@@ -101,14 +109,16 @@
 
   async function refresh() {
     try {
-      const [summary, wishes, train] = await Promise.all([
+      const [summary, wishes, train, speaker] = await Promise.all([
         api('/summary').then(r => r.json()),
         api('/wishes').then(r => r.json()),
         api('/train').then(r => r.json()),
+        api('/speaker').then(r => r.json()),
       ]);
       $('app').hidden = false;
       renderSummary(summary);
       renderTrain(train);
+      renderSpeaker(speaker);
       renderAlerts(wishes);
       renderShopping(wishes);
       renderWishes(wishes);
@@ -131,15 +141,19 @@
   const ago = ms => { const t = Math.max(0, Math.round(ms / 1000)); return t < 90 ? `${t} s` : `${Math.round(t / 60)} min`; };
 
   // Ages measured on the Pi's clock at fetch time, then counted on from there, so the phone's clock doesn't matter.
-  let clock = null;
+  // One for each panel: the train's hub and Santa's speaker.
+  const clocks = {};
   function tick() {
-    if (!clock) return;
-    const since = performance.now() - clock.fetched;
-    if (clock.connected != null && $('uptime')) $('uptime').textContent = hms(clock.connected + since);
-    const heard = clock.heard + since;
-    if ($('heard')) {
-      $('heard').textContent = ago(heard);
-      $('heard').parentElement.classList.toggle('stale', heard > QuietAfterMs);
+    for (const c of Object.values(clocks)) {
+      if (!c) continue;
+      const since = performance.now() - c.fetched;
+      const up = $(c.uptimeId), heard = $(c.heardId);
+      if (c.connected != null && up) up.textContent = hms(c.connected + since);
+      if (heard) {
+        const age = c.heard + since;
+        heard.textContent = ago(age);
+        heard.parentElement.classList.toggle('stale', age > QuietAfterMs);
+      }
     }
   }
   setInterval(tick, 1000);
@@ -149,7 +163,7 @@
     const now = Date.parse(t.now);
     const quiet = s && now - Date.parse(s.at) > QuietAfterMs;
     renderDriver(t.mqttConnected && !quiet ? s : null);
-    clock = null;
+    clocks.train = null;
     if (!t.mqttConnected) { $('trainStatus').innerHTML = '<span class="pill bad">MQTT offline</span>'; return; }
     if (!s) { $('trainStatus').innerHTML = '<span class="pill bad">Signal box not seen yet</span>'; return; }
     const awake = s.hubConnected && !quiet;
@@ -171,10 +185,47 @@
         '(Rudolph carries them) and Test run won\'t start.</div>' : '') +
       `<div class="muted" style="margin-top:6px">Train: ${esc(s.trainMode)} · Track: ${esc(s.tracksideMode)} · ` +
       `<span>updated <span id="heard"></span> ago</span></div>`;
-    clock = {
+    clocks.train = {
       fetched: performance.now(),
+      uptimeId: 'uptime',
+      heardId: 'heard',
       heard: now - Date.parse(s.at),
       connected: awake && s.connectedSince ? now - Date.parse(s.connectedSince) : null,
+    };
+    tick();
+  }
+
+  // Santa's speaker: a Chromecast one HQ keeps a link to, or the Pi's own output when none is named.
+  function renderSpeaker(sp) {
+    const s = sp.state, now = Date.parse(sp.now), pct = v => Math.round(v * 100) + '%';
+    clocks.speaker = null;
+    $('speakerConnect').disabled = !s.configured || s.connected;
+    $('speakerDisconnect').disabled = !s.connected;
+    if (!s.configured) {
+      $('speakerStatus').innerHTML = '<span class="pill">The Pi\'s own output</span>' +
+        '<div class="muted" style="margin-top:6px">No Chromecast speaker is named (Voice:CastTo), so Santa plays on the Pi.</div>';
+      return;
+    }
+    const pills = [s.connected ? '<span class="pill ok">Connected <span id="spUptime"></span></span>'
+      : s.wanted ? '<span class="pill">Looking for it</span>'
+      : '<span class="pill bad">Disconnected</span>'];
+    if (s.connected && s.volume != null) pills.push(`<span class="pill">Volume ${pct(s.volume)}</span>`);
+    if (s.connected && s.muted) pills.push('<span class="pill bad">Muted</span>');
+    if (s.connected && s.playing) pills.push(`<span class="pill">Playing ${esc(s.playing)}</span>`);
+    const lines = [esc(s.name) + (s.address && s.address !== s.name ? ' · ' + esc(s.address) : '')];
+    if (s.connected && sp.santaVolume != null)
+      lines.push(`Santa plays at ${pct(sp.santaVolume)}: the volume + ${Math.round(sp.above * 100)}, between ${pct(sp.min)} and ${pct(sp.max)}.`);
+    if (!s.connected) lines.push(s.wanted
+      ? 'HQ keeps looking. If it doesn\'t answer when Santa speaks, he plays on the Pi instead.'
+      : 'Santa plays on the Pi\'s own output until Connect.');
+    if (s.connected && s.at) lines.push('<span>updated <span id="spHeard"></span> ago</span>');
+    $('speakerStatus').innerHTML = pills.join(' ') + lines.map(l => `<div class="muted" style="margin-top:6px">${l}</div>`).join('');
+    if (s.connected) clocks.speaker = {
+      fetched: performance.now(),
+      uptimeId: 'spUptime',
+      heardId: 'spHeard',
+      connected: s.connectedSince ? now - Date.parse(s.connectedSince) : null,
+      heard: s.at ? now - Date.parse(s.at) : 0,
     };
     tick();
   }
@@ -256,6 +307,11 @@
         else await drive(speed);
       }
       if (b.dataset.replay) await api(`/wishes/${b.dataset.replay}/replay`, { method: 'POST' });
+      if (b.id === 'speakerConnect' || b.id === 'speakerDisconnect') {
+        b.disabled = true;
+        await api(b.id === 'speakerConnect' ? '/speaker/connect' : '/speaker/disconnect', { method: 'POST' });
+        setTimeout(refreshLive, 1500);
+      }
       if (b.id === 'voiceTest') {
         b.disabled = true;
         $('voiceNote').textContent = 'Santa is speaking…';
@@ -277,13 +333,17 @@
   });
 
   // The train every 3 s, the letters every 15 s, and everything at once when the phone comes back to the page.
-  async function refreshTrain() {
-    try { renderTrain(await api('/train').then(r => r.json())); }
+  async function refreshLive() {
+    try {
+      const [train, speaker] = await Promise.all([api('/train').then(r => r.json()), api('/speaker').then(r => r.json())]);
+      renderTrain(train);
+      renderSpeaker(speaker);
+    }
     catch (e) { if (e.message !== 'login') console.error(e); }
   }
   const showing = () => !$('app').hidden && !document.hidden;
   refresh();
-  setInterval(() => { if (showing()) refreshTrain(); }, 3000);
+  setInterval(() => { if (showing()) refreshLive(); }, 3000);
   setInterval(() => { if (showing()) refresh(); }, 15000);
   document.addEventListener('visibilitychange', () => { if (showing()) refresh(); });
 })();

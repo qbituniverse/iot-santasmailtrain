@@ -151,8 +151,8 @@ body.elves { background: #f6f3ee; }
 .driver #driverNote:empty { display: none; }
 #voiceNote { margin: 8px 0 0; }
 #voiceNote:empty { display: none; }
-#trainStatus #uptime { font-variant-numeric: tabular-nums; }
-#trainStatus .stale { color: #8f1d1d; font-weight: 600; }
+#uptime, #spUptime { font-variant-numeric: tabular-nums; }
+#trainStatus .stale, #speakerStatus .stale { color: #8f1d1d; font-weight: 600; }
 
 .alert { background: #fff6e8; border: 1px solid #f0cf97; border-left: 5px solid var(--warn); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
 .alert strong { display: block; margin-bottom: 2px; }
