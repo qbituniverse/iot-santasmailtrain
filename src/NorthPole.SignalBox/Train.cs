@@ -199,8 +199,9 @@ public sealed class BlueZTrain(IOptions<SignalBoxOptions> options, ILogger<BlueZ
         (_device, _lwp, _since, _connected) = (device, lwp, DateTimeOffset.Now, true);
 
         await RefreshBatteryAsync(ct);
-        log.LogInformation("Connected to hub {Name}, battery {Battery}% ({Volts})", await device.GetAliasAsync(), BatteryPercent,
-            _volts is { } v ? $"{v:0.00} V" : "voltage not reported yet");
+        for (var i = 0; i < 10 && (BatteryPercent is null || _volts is null); i++) await Task.Delay(100, ct); // first answers
+        log.LogInformation("Connected to hub {Name}, battery {Battery} ({Volts})", await device.GetAliasAsync(),
+            BatteryPercent is { } b ? $"{b}%" : "not reported yet", _volts is { } v ? $"{v:0.00} V" : "voltage not reported yet");
     }
 
     /// <summary>

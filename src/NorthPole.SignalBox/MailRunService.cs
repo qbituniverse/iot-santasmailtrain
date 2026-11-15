@@ -321,6 +321,11 @@ public sealed class MailRunService : BackgroundService
 
     async Task SafeBrakeAsync()
     {
+        if (!_train.IsConnected)
+        {
+            _speed = 0; // no hub to send the brake to (after Disconnect, Stop is a no-op)
+            return;
+        }
         try
         {
             await _train.BrakeAsync(CancellationToken.None);
@@ -381,7 +386,7 @@ public sealed class MailRunService : BackgroundService
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
                 {
-                    _log.LogWarning("Train not reachable yet ({Message}). Retrying in 15s", ex.Message);
+                    _log.LogWarning("Train not reachable yet ({Message}). Still looking", ex.Message);
                 }
                 finally
                 {
