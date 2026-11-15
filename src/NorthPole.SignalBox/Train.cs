@@ -25,6 +25,9 @@ public interface ITrain
     Task BrakeAsync(CancellationToken ct);
     Task SetLightAsync(int brightness, CancellationToken ct);
     Task RefreshBatteryAsync(CancellationToken ct);
+
+    /// <summary>Lets the hub go on purpose. Its light flashes again, and it can be connected again while it does.</summary>
+    Task DisconnectAsync(CancellationToken ct);
 }
 
 /// <summary>
@@ -122,6 +125,14 @@ public sealed class PoweredUpTrain(IOptions<SignalBoxOptions> options, ILoggerFa
             _hub = null; // hub switched off or out of range: the signal box will reconnect
             throw;
         }
+    }
+
+    public async Task DisconnectAsync(CancellationToken ct)
+    {
+        if (_hub is not { } hub) return;
+        _hub = null;
+        await hub.DisconnectAsync();
+        log.LogInformation("Let the hub go");
     }
 
     public async ValueTask DisposeAsync()
@@ -241,7 +252,14 @@ public sealed class BlueZTrain(IOptions<SignalBoxOptions> options, ILogger<BlueZ
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(60));
-            return await found.Task.WaitAsync(timeout.Token);
+            try
+            {
+                return await found.Task.WaitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new TimeoutException("no hub seen in 60 s");
+            }
         }
         finally
         {
@@ -316,6 +334,23 @@ public sealed class BlueZTrain(IOptions<SignalBoxOptions> options, ILogger<BlueZ
             if (was) StatusChanged?.Invoke();
             throw;
         }
+    }
+
+    public async Task DisconnectAsync(CancellationToken ct)
+    {
+        if (_device is not { } device) return;
+        var connectedFor = DateTimeOffset.Now - _since;
+        _connected = false;
+        device.Disconnected -= OnDisconnectedAsync; // on purpose, not a drop
+        try
+        {
+            await device.DisconnectAsync();
+        }
+        finally
+        {
+            Release();
+        }
+        log.LogInformation("Let the hub go after {Connected}", connectedFor.ToString(@"h\:mm\:ss"));
     }
 
     void Release()
@@ -432,10 +467,18 @@ public sealed class SimulatedTrain(ILogger<SimulatedTrain> log) : ITrain
     public int Power { get; private set; }
     public event Action? StatusChanged;
 
-    public Task ConnectAsync(CancellationToken ct)
+    public async Task ConnectAsync(CancellationToken ct)
     {
+        log.LogInformation("(sim) Looking for the hub: it answers in 3 s, as if its green button were pressed");
+        await Task.Delay(TimeSpan.FromSeconds(3), ct);
         (IsConnected, _since) = (true, DateTimeOffset.Now);
         log.LogInformation("Simulated train ready (no Bluetooth needed)");
+    }
+
+    public Task DisconnectAsync(CancellationToken ct)
+    {
+        IsConnected = false;
+        log.LogInformation("(sim) Let the hub go");
         return Task.CompletedTask;
     }
 

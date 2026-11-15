@@ -31,6 +31,10 @@
         <h2>Mail train</h2>
         <div id="trainStatus" class="muted">Checking…</div>
         <div class="actions">
+          <button class="btn secondary" id="connect" data-cmd="Connect" disabled>Connect</button>
+          <button class="btn secondary" id="disconnect" data-cmd="Disconnect" disabled>Disconnect</button>
+        </div>
+        <div class="actions">
           <button class="btn go" data-cmd="TestRun">Test run</button>
           <button class="btn" data-cmd="Stop">Stop run</button>
         </div>
@@ -150,9 +154,15 @@
     const doing = s.busy ? 'On a run' : s.speed ? `Driving at ${s.speed}` : 'Waiting';
     const link = quiet ? '<span class="pill bad">Signal box quiet</span>'
       : awake ? '<span class="pill ok">Connected <span id="uptime"></span></span>'
-      : '<span class="pill bad">Train asleep</span>';
+      : s.listening ? '<span class="pill">Listening for the train</span>'
+      : '<span class="pill bad">Disconnected</span>';
+    const hint = quiet || awake ? ''
+      // A flashing hub is already waiting to be found; another press of its button would switch it off.
+      : s.listening ? 'If the light on the train\'s hub isn\'t flashing, press its green button.'
+      : 'Press Connect to look for the train again, and the hub\'s green button if its light isn\'t flashing.';
     $('trainStatus').innerHTML =
       `${link} <span class="pill ${low ? 'bad' : ''}">Battery ${esc(battery)}</span> <span class="pill">${esc(doing)}</span>` +
+      (hint ? `<div class="muted" style="margin-top:6px">${hint}</div>` : '') +
       (low && awake ? `<div class="muted" style="margin-top:6px">Below ${s.lowBatteryPercent}% the train turns letters away ` +
         '(Rudolph carries them) and Test run won\'t start.</div>' : '') +
       `<div class="muted" style="margin-top:6px">Train: ${esc(s.trainMode)} · Track: ${esc(s.tracksideMode)} · ` +
@@ -180,8 +190,10 @@
     $('speedOut').textContent = slider.value;
     slider.disabled = $('driveStart').disabled = !canDrive;
     document.querySelectorAll('.driver [data-cmd^="Lights"]').forEach(b => b.disabled = !awake);
+    $('disconnect').disabled = !awake;
+    $('connect').disabled = !s || awake;
     $('driverNote').textContent = !s ? 'The signal box isn\'t answering.'
-      : !awake ? 'Wake the train first: press the green button on its hub.'
+      : !awake ? 'Connect the train first.'
       : s.busy ? 'On a mail run: the driver takes over once it\'s back.' : '';
   }
 

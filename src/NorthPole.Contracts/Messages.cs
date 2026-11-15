@@ -50,6 +50,10 @@ public sealed record ReturnHome(Guid WishId);
 /// <param name="BatteryVolts">The hub's measured battery voltage: six fresh AA or AAA cells give about 9 V.</param>
 /// <param name="ConnectedSince">When the hub connected, so the dashboard can show how long it has been.</param>
 /// <param name="LowBatteryPercent">Below this the signal box turns letters away, so the dashboard can say why.</param>
+/// <param name="Listening">
+/// The signal box is looking for the hub, so pressing its green button connects it. It does from start-up and after
+/// a Connect, and stops after a Disconnect.
+/// </param>
 public sealed record TrainState(
     bool HubConnected,
     int? BatteryPercent,
@@ -61,13 +65,15 @@ public sealed record TrainState(
     int MaxSpeed = 0,
     double? BatteryVolts = null,
     DateTimeOffset? ConnectedSince = null,
-    int LowBatteryPercent = 0);
+    int LowBatteryPercent = 0,
+    bool Listening = false);
 
 /// <summary>
 /// Stop brakes and ends the mail run in progress. Drive is the dashboard's train driver: it sets the motor to
-/// <see cref="TrainCommand.Speed"/> (0 brakes), and only between mail runs.
+/// <see cref="TrainCommand.Speed"/> (0 brakes), and only between mail runs. Disconnect stops the train, lets the hub go
+/// and stops looking for it; Connect looks for it again, so the hub's green button connects it.
 /// </summary>
-public enum TrainCommandKind { Stop, TestRun, LightsOn, LightsOff, Whistle, Drive }
+public enum TrainCommandKind { Stop, TestRun, LightsOn, LightsOff, Whistle, Drive, Connect, Disconnect }
 
 public sealed record TrainCommand(TrainCommandKind Kind, int? Speed = null);
 

@@ -27,6 +27,9 @@ public sealed class MailRunService : BackgroundService
     readonly Lock _returnLock = new();
     TaskCompletionSource? _santaFinished;
     CancellationTokenSource? _run; // the mail run in progress, so the dashboard's Stop can end it
+    CancellationTokenSource? _scan; // the search for the hub in progress, so Disconnect can end it
+    readonly SemaphoreSlim _wake = new(0, 1); // Connect, or a dropped hub: look for it now, not after the pause
+    volatile bool _listening = true; // look for the hub from start-up, until an elf presses Disconnect
     Guid? _currentWish;
     int _speed;
 
@@ -43,7 +46,11 @@ public sealed class MailRunService : BackgroundService
         mqtt.On<MailDispatch>(Topics.Dispatch, OnDispatchAsync);
         mqtt.On<ReturnHome>(Topics.ReturnHome, OnReturnHome);
         mqtt.On<TrainCommand>(Topics.Command, OnCommandAsync);
-        train.StatusChanged += () => _ = PublishStateQuietlyAsync(); // a dropped hub or a new battery reading: tell HQ now
+        train.StatusChanged += () =>
+        {
+            _ = PublishStateQuietlyAsync(); // a dropped hub or a new battery reading: tell HQ now
+            if (!train.IsConnected) Wake(); // and look for a dropped hub straight away
+        };
         mqtt.ConnectionChanged += connected =>
         {
             if (connected)
@@ -140,7 +147,46 @@ public sealed class MailRunService : BackgroundService
             case TrainCommandKind.Whistle:
                 await BlinkLightsAsync(3, ct);
                 break;
+            case TrainCommandKind.Connect:
+                _log.LogInformation("Connect from the dashboard: looking for the hub, press its green button");
+                _listening = true;
+                Wake();
+                await PublishStateAsync();
+                break;
+            case TrainCommandKind.Disconnect:
+                await DisconnectAsync();
+                break;
         }
+    }
+
+    /// <summary>The dashboard's Disconnect: stop looking for the hub, end any run like Stop, then let the hub go.</summary>
+    async Task DisconnectAsync()
+    {
+        _log.LogInformation("Disconnect from the dashboard");
+        _listening = false;
+        try { _scan?.Cancel(); } // a search in progress gives up
+        catch (ObjectDisposedException) { } // it had just finished
+        try { _run?.Cancel(); }
+        catch (ObjectDisposedException) { }
+        await SafeBrakeAsync();
+
+        // A stopped run brakes and reports itself first, while the hub is still there to hear it.
+        for (var i = 0; i < 30 && _currentWish is not null; i++) await Task.Delay(100);
+        try
+        {
+            await _train.DisconnectAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning("The hub didn't disconnect cleanly ({Message})", ex.Message);
+        }
+        await PublishStateAsync();
+    }
+
+    void Wake()
+    {
+        try { _wake.Release(); }
+        catch (SemaphoreFullException) { } // already woken
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -304,24 +350,46 @@ public sealed class MailRunService : BackgroundService
         return _mqtt.PublishAsync(Topics.Progress, new MailProgress(job.WishId, stage, detail, DateTimeOffset.Now));
     }
 
+    /// <summary>
+    /// While listening, looks for the hub whenever it isn't connected: 60 s searches with 15 s pauses, cut short by
+    /// Connect or a dropped hub. After Disconnect it only waits for the next Connect.
+    /// </summary>
     async Task KeepTrainConnectedAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
-            if (!_train.IsConnected)
+            if (_listening && !_train.IsConnected)
             {
+                using var scan = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                _scan = scan;
                 try
                 {
-                    await _train.ConnectAsync(ct);
-                    await _train.SetLightAsync(30, ct);
-                    await PublishStateAsync();
+                    await _train.ConnectAsync(scan.Token);
+                    if (!_listening)
+                    {
+                        // Disconnect came while the hub was connecting: let it go again.
+                        await _train.DisconnectAsync(ct);
+                    }
+                    else
+                    {
+                        await _train.SetLightAsync(30, ct);
+                    }
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    // Disconnect while searching.
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
                 {
                     _log.LogWarning("Train not reachable yet ({Message}). Retrying in 15s", ex.Message);
                 }
+                finally
+                {
+                    _scan = null;
+                }
+                await PublishStateQuietlyAsync();
             }
-            try { await Task.Delay(TimeSpan.FromSeconds(15), ct); }
+            try { await _wake.WaitAsync(TimeSpan.FromSeconds(15), ct); }
             catch (OperationCanceledException) { return; }
         }
     }
@@ -347,7 +415,8 @@ public sealed class MailRunService : BackgroundService
 
     Task PublishStateAsync() => _mqtt.PublishAsync(Topics.TrainState, new TrainState(
         _train.IsConnected, _train.BatteryPercent, _speed, _currentWish is not null, _train.Mode, _track.Mode, DateTimeOffset.Now,
-        Math.Clamp(_o.Train.MaxSpeed, 0, 100), _train.BatteryVolts, _train.ConnectedSince, _o.Train.LowBatteryPercent), retain: true);
+        Math.Clamp(_o.Train.MaxSpeed, 0, 100), _train.BatteryVolts, _train.ConnectedSince, _o.Train.LowBatteryPercent,
+        _listening), retain: true);
 
     async Task PublishStateQuietlyAsync()
     {
