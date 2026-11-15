@@ -26,6 +26,7 @@ public sealed class MailRunService : BackgroundService
     readonly Channel<MailDispatch> _queue = Channel.CreateBounded<MailDispatch>(10);
     readonly Lock _returnLock = new();
     TaskCompletionSource? _santaFinished;
+    CancellationTokenSource? _run; // the mail run in progress, so the dashboard's Stop can end it
     Guid? _currentWish;
     int _speed;
 
@@ -69,6 +70,12 @@ public sealed class MailRunService : BackgroundService
             await ReportAsync(job, MailStage.Rejected, $"Train batteries are low ({battery}%)");
             return;
         }
+        if (_currentWish is null && _speed != 0)
+        {
+            // Somewhere on the line, not at the mailbox: the train driver has to stop it first.
+            await ReportAsync(job, MailStage.Rejected, "An elf is driving the train");
+            return;
+        }
         if (!_queue.Writer.TryWrite(job))
         {
             await ReportAsync(job, MailStage.Rejected, "Too much post in the queue");
@@ -92,7 +99,33 @@ public sealed class MailRunService : BackgroundService
         switch (cmd.Kind)
         {
             case TrainCommandKind.Stop:
+                _log.LogInformation("Stop from the dashboard");
+                try { _run?.Cancel(); } // the run brakes and reports itself stopped
+                catch (ObjectDisposedException) { } // it had just finished
                 await SafeBrakeAsync();
+                await PublishStateAsync();
+                break;
+            case TrainCommandKind.Drive:
+                if (_currentWish is not null)
+                {
+                    _log.LogWarning("Train driver ignored: the train is on a mail run");
+                    break;
+                }
+                if (!_train.IsConnected)
+                {
+                    _log.LogWarning("Train driver ignored: the LEGO hub isn't connected");
+                    break;
+                }
+                if (cmd.Speed is not (> 0 and var speed))
+                {
+                    await SafeBrakeAsync();
+                }
+                else
+                {
+                    _log.LogInformation("Train driver: speed {Speed}", speed);
+                    await SetSpeedAsync(speed, ct); // capped at MaxSpeed, like every other speed
+                }
+                await PublishStateAsync();
                 break;
             case TrainCommandKind.TestRun:
                 await OnDispatchAsync(new MailDispatch(Guid.NewGuid(), "Test", DateTimeOffset.Now, WaitForSanta: false));
@@ -119,13 +152,22 @@ public sealed class MailRunService : BackgroundService
         await foreach (var job in _queue.Reader.ReadAllAsync(stoppingToken))
         {
             _currentWish = job.WishId;
+            using var run = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            _run = run;
             try
             {
-                await RunMailAsync(job, stoppingToken);
+                await PublishStateAsync(); // busy now, so the dashboard's train driver steps aside at once
+                await RunMailAsync(job, run.Token);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;
+            }
+            catch (OperationCanceledException) when (run.IsCancellationRequested)
+            {
+                await SafeBrakeAsync();
+                await ReportAsync(job, MailStage.Failed, "Stopped from the dashboard");
+                _board.Show(job, MailStage.Home); // a grown-up stopped it: no "Grown-up needed" on the board
             }
             catch (Exception ex)
             {
@@ -135,6 +177,7 @@ public sealed class MailRunService : BackgroundService
             }
             finally
             {
+                _run = null;
                 _currentWish = null;
                 _track.SetFlag(false);
                 _track.SetSignal(SignalAspect.Red);
@@ -179,6 +222,7 @@ public sealed class MailRunService : BackgroundService
                 santaDone = _santaFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             }
             await Task.WhenAny(santaDone.Task, Task.Delay(TimeSpan.FromSeconds(_o.Run.MaxWaitAtNorthPoleSeconds), ct));
+            ct.ThrowIfCancellationRequested(); // WhenAny doesn't throw: a Stop while Santa reads ends the run here
         }
         else
         {
@@ -220,6 +264,7 @@ public sealed class MailRunService : BackgroundService
     /// <summary>The only way the motor gets power. Caps the speed whatever was asked.</summary>
     async Task SetSpeedAsync(int requested, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested(); // a stopped run never starts the motor again
         var max = Math.Clamp(_o.Train.MaxSpeed, 0, 100);
         var speed = Math.Clamp(requested, -max, max);
         if (speed != requested) _log.LogWarning("Speed {Requested} capped to {Speed}", requested, speed);
@@ -300,6 +345,6 @@ public sealed class MailRunService : BackgroundService
     }
 
     Task PublishStateAsync() => _mqtt.PublishAsync(Topics.TrainState, new TrainState(
-        _train.IsConnected, _train.BatteryPercent, _speed, _currentWish is not null, _train.Mode, _track.Mode, DateTimeOffset.Now),
-        retain: true);
+        _train.IsConnected, _train.BatteryPercent, _speed, _currentWish is not null, _train.Mode, _track.Mode, DateTimeOffset.Now,
+        Math.Clamp(_o.Train.MaxSpeed, 0, 100)), retain: true);
 }

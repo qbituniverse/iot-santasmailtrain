@@ -31,11 +31,25 @@
         <h2>Mail train</h2>
         <div id="trainStatus" class="muted">Checking…</div>
         <div class="actions">
-          <button class="btn" data-cmd="TestRun">Test run</button>
-          <button class="btn secondary" data-cmd="Stop">Stop</button>
-          <button class="btn secondary" data-cmd="LightsOn">Lights on</button>
-          <button class="btn secondary" data-cmd="LightsOff">Lights off</button>
+          <button class="btn go" data-cmd="TestRun">Test run</button>
+          <button class="btn" data-cmd="Stop">Stop run</button>
         </div>
+        <section class="driver" aria-labelledby="driverTitle">
+          <h3 id="driverTitle">Train driver</h3>
+          <div class="actions">
+            <button class="btn go" id="driveStart" data-drive>Start</button>
+            <button class="btn" data-cmd="Stop">Stop</button>
+          </div>
+          <label class="speed" for="speed">
+            <span>Speed <output id="speedOut" for="speed">30</output> of <span id="speedMax">70</span></span>
+            <input type="range" id="speed" min="0" max="70" step="5" value="30">
+          </label>
+          <div class="actions">
+            <button class="btn secondary" data-cmd="LightsOn">Lights on</button>
+            <button class="btn secondary" data-cmd="LightsOff">Lights off</button>
+          </div>
+          <p class="muted" id="driverNote" role="status"></p>
+        </section>
       </section>
       <section class="panel">
         <h2>This December</h2>
@@ -102,14 +116,48 @@
 
   function renderTrain(t) {
     const s = t.state;
+    renderDriver(t.mqttConnected ? s : null);
     if (!t.mqttConnected) { $('trainStatus').innerHTML = '<span class="pill bad">MQTT offline</span>'; return; }
     if (!s) { $('trainStatus').innerHTML = '<span class="pill bad">Signal box not seen yet</span>'; return; }
     const battery = s.batteryPercent == null ? '?' : s.batteryPercent + '%';
+    const doing = s.busy ? 'On a run' : s.speed ? `Driving at ${s.speed}` : 'Waiting';
     $('trainStatus').innerHTML =
       `<span class="pill ${t.online ? 'ok' : 'bad'}">${t.online ? 'Online' : 'Offline'}</span> ` +
-      `<span class="pill">Battery ${esc(battery)}</span> <span class="pill">${s.busy ? 'On a run' : 'Waiting'}</span>` +
+      `<span class="pill">Battery ${esc(battery)}</span> <span class="pill">${esc(doing)}</span>` +
       `<div class="muted" style="margin-top:6px">Train: ${esc(s.trainMode)} · Track: ${esc(s.tracksideMode)}</div>`;
   }
+
+  // The train driver: only between mail runs, and only once the hub is awake. Stop always works.
+  let trainState = null;
+  function renderDriver(s) {
+    trainState = s;
+    const slider = $('speed');
+    const awake = !!s?.hubConnected;
+    const canDrive = awake && !s.busy;
+    const max = s?.maxSpeed || 70; // an older signal box doesn't say: its default cap
+    slider.max = max;
+    $('speedMax').textContent = max;
+    if (s?.speed > 0 && !s.busy && document.activeElement !== slider) slider.value = s.speed;
+    if (+slider.value > max) slider.value = max;
+    $('speedOut').textContent = slider.value;
+    slider.disabled = $('driveStart').disabled = !canDrive;
+    document.querySelectorAll('.driver [data-cmd^="Lights"]').forEach(b => b.disabled = !awake);
+    $('driverNote').textContent = !s ? 'The signal box isn\'t answering.'
+      : !awake ? 'Wake the train first: press the green button on its hub.'
+      : s.busy ? 'On a mail run: the driver takes over once it\'s back.' : '';
+  }
+
+  async function drive(speed) {
+    await api('/train/Drive?speed=' + speed, { method: 'POST' });
+    setTimeout(refresh, 600);
+  }
+
+  // While the train moves, letting go of the slider changes its speed.
+  $('speed').addEventListener('input', e => { $('speedOut').textContent = e.target.value; });
+  $('speed').addEventListener('change', async e => {
+    if (!(trainState?.speed > 0) || trainState.busy) return; // standing still: Start sends the speed
+    try { await drive(+e.target.value); } catch (err) { if (err.message !== 'login') console.error(err); }
+  });
 
   function renderAlerts(wishes) {
     const flagged = wishes.filter(w => w.reading?.parentHeadsUp);
@@ -148,6 +196,11 @@
     if (!b) return;
     try {
       if (b.dataset.cmd) { await api('/train/' + b.dataset.cmd, { method: 'POST' }); setTimeout(refresh, 800); }
+      if (b.dataset.drive !== undefined) {
+        const speed = +$('speed').value;
+        if (speed === 0) $('driverNote').textContent = 'Set a speed above 0 first.';
+        else await drive(speed);
+      }
       if (b.dataset.replay) await api(`/wishes/${b.dataset.replay}/replay`, { method: 'POST' });
       if (b.dataset.extra) { await api(`/children/${b.dataset.extra}/extra-wish`, { method: 'POST' }); b.textContent = 'Granted!'; }
     } catch (err) { if (err.message !== 'login') console.error(err); }

@@ -47,6 +47,7 @@ public sealed class StationBoard(IOptions<SignalBoxOptions> options, TimeProvide
                     break;
                 case MailStage.Home:
                     _run = null;
+                    _stopped = false; // also after a run the dashboard stopped: back to the idle lines
                     break;
                 case MailStage.Failed:
                     _run = null;

@@ -235,8 +235,13 @@ elves.MapGet("/cards", (FamilyService family, QrCards cards) =>
 elves.MapGet("/train", (MailTrainClient train, MqttLink mqtt) =>
     new { mqttConnected = mqtt.IsConnected, online = train.TrainLooksOnline, state = train.State });
 
-elves.MapPost("/train/{command}", async (TrainCommandKind command, MailTrainClient train) =>
-    await train.SendCommandAsync(command) ? Results.Ok() : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
+// The train driver sends Drive with ?speed=0..100; the signal box caps it at its MaxSpeed.
+elves.MapPost("/train/{command}", async (TrainCommandKind command, int? speed, MailTrainClient train) =>
+    command == TrainCommandKind.Drive && speed is not (>= 0 and <= 100)
+        ? Results.BadRequest("Drive needs a speed from 0 to 100")
+        : await train.SendCommandAsync(command, command == TrainCommandKind.Drive ? speed : null)
+            ? Results.Ok()
+            : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
 
 elves.MapGet("/summary", (WishStore store, FamilyService family) =>
 {
