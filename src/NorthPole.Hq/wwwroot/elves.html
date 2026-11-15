@@ -27,7 +27,7 @@
     <div id="alerts"></div>
 
     <div class="grid">
-      <section class="panel">
+      <section class="panel" id="trainPanel">
         <h2>Mail train</h2>
         <div id="trainStatus" class="muted">Checking…</div>
         <div class="actions">
@@ -41,8 +41,9 @@
         <section class="driver" aria-labelledby="driverTitle">
           <h3 id="driverTitle">Train driver</h3>
           <div class="actions">
-            <button class="btn go" id="driveStart" data-drive>Start</button>
+            <button class="btn go" data-drive="reverse">&larr; Reverse</button>
             <button class="btn" data-cmd="Stop">Stop</button>
+            <button class="btn go" data-drive="forward">Forward &rarr;</button>
           </div>
           <label class="speed" for="speed">
             <span>Speed <output id="speedOut" for="speed">30</output> of <span id="speedMax">70</span></span>
@@ -90,6 +91,7 @@
     <div id="wishes" class="wishes"></div>
   </main>
 
+<script src="/js/train-panel.js"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -124,7 +126,7 @@
       ]);
       $('app').hidden = false;
       renderSummary(summary);
-      renderTrain(train);
+      panel.render(train);
       renderSpeaker(speaker);
       renderAlerts(wishes);
       renderShopping(wishes);
@@ -139,68 +141,14 @@
       `<button class="btn secondary" data-extra="${esc(c.id)}">Extra wish today for ${esc(c.name)}</button>`).join('');
   }
 
-  // The signal box publishes every 10 s and on every change; a state older than this means it has gone quiet.
-  const QuietAfterMs = 30000;
-  const hms = ms => {
-    const t = Math.max(0, Math.floor(ms / 1000));
-    return `${Math.floor(t / 3600)}:${String(Math.floor(t / 60) % 60).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
-  };
-  const ago = ms => { const t = Math.max(0, Math.round(ms / 1000)); return t < 90 ? `${t} s` : `${Math.round(t / 60)} min`; };
-
-  // Ages measured on the Pi's clock at fetch time, then counted on from there, so the phone's clock doesn't matter.
-  // One for each panel: the train's hub and Santa's speaker.
-  const clocks = {};
-  function tick() {
-    for (const c of Object.values(clocks)) {
-      if (!c) continue;
-      const since = performance.now() - c.fetched;
-      const up = $(c.uptimeId), heard = $(c.heardId);
-      if (c.connected != null && up) up.textContent = hms(c.connected + since);
-      if (heard) {
-        const age = c.heard + since;
-        heard.textContent = ago(age);
-        heard.parentElement.classList.toggle('stale', age > QuietAfterMs);
-      }
-    }
-  }
-  setInterval(tick, 1000);
-
-  function renderTrain(t) {
-    const s = t.state;
-    const now = Date.parse(t.now);
-    const quiet = s && now - Date.parse(s.at) > QuietAfterMs;
-    renderDriver(t.mqttConnected && !quiet ? s : null);
-    clocks.train = null;
-    if (!t.mqttConnected) { $('trainStatus').innerHTML = '<span class="pill bad">MQTT offline</span>'; return; }
-    if (!s) { $('trainStatus').innerHTML = '<span class="pill bad">Signal box not seen yet</span>'; return; }
-    const awake = s.hubConnected && !quiet;
-    const low = s.batteryPercent != null && s.batteryPercent < s.lowBatteryPercent;
-    const battery = (s.batteryPercent == null ? '?' : s.batteryPercent + '%') + (s.batteryVolts == null ? '' : ` · ${s.batteryVolts.toFixed(1)} V`);
-    const doing = s.busy ? 'On a run' : s.speed ? `Driving at ${s.speed}` : 'Waiting';
-    const link = quiet ? '<span class="pill bad">Signal box quiet</span>'
-      : awake ? '<span class="pill ok">Connected <span id="uptime"></span></span>'
-      : s.listening ? '<span class="pill">Listening for the train</span>'
-      : '<span class="pill bad">Disconnected</span>';
-    const hint = quiet || awake ? ''
-      // A flashing hub is already waiting to be found; another press of its button would switch it off.
-      : s.listening ? 'If the light on the train\'s hub isn\'t flashing, press its green button.'
-      : 'Press Connect to look for the train again, and the hub\'s green button if its light isn\'t flashing.';
-    $('trainStatus').innerHTML =
-      `${link} <span class="pill ${low ? 'bad' : ''}">Battery ${esc(battery)}</span> <span class="pill">${esc(doing)}</span>` +
-      (hint ? `<div class="muted" style="margin-top:6px">${hint}</div>` : '') +
-      (low && awake ? `<div class="muted" style="margin-top:6px">Below ${s.lowBatteryPercent}% the train turns letters away ` +
-        '(Rudolph carries them) and Test run won\'t start.</div>' : '') +
-      `<div class="muted" style="margin-top:6px">Train: ${esc(s.trainMode)} · Track: ${esc(s.tracksideMode)} · ` +
-      `<span>updated <span id="heard"></span> ago</span></div>`;
-    clocks.train = {
-      fetched: performance.now(),
-      uptimeId: 'uptime',
-      heardId: 'heard',
-      heard: now - Date.parse(s.at),
-      connected: awake && s.connectedSince ? now - Date.parse(s.connectedSince) : null,
-    };
-    tick();
-  }
+  // The mail train panel (shared with the train driver's page) and the speaker's connection timer.
+  const panel = NorthPole.trainPanel({
+    root: $('trainPanel'),
+    api,
+    onCommand: () => refreshLive(),
+    onError: err => { if (err.message !== 'login') console.error(err); },
+  });
+  const speakerClock = NorthPole.clock();
 
   // Santa's speaker: a Chromecast one HQ keeps a link to, or the Pi's own output when none is named.
   // Santa plays this far above the speaker's volume, within its limits (as SantaLoudness.LevelFor on HQ).
@@ -218,7 +166,7 @@
   function renderSpeaker(sp) {
     const s = sp.state, now = Date.parse(sp.now);
     speakerInfo = sp;
-    clocks.speaker = null;
+    speakerClock.set(null);
     $('speakerConnect').disabled = !s.configured || s.connected;
     $('speakerDisconnect').disabled = !s.connected;
     const loud = $('loudness');
@@ -245,14 +193,12 @@
       : 'Santa plays on the Pi\'s own output until Connect.');
     if (s.connected && s.at) lines.push('<span>updated <span id="spHeard"></span> ago</span>');
     $('speakerStatus').innerHTML = pills.join(' ') + lines.map(l => `<div class="muted" style="margin-top:6px">${l}</div>`).join('');
-    if (s.connected) clocks.speaker = {
-      fetched: performance.now(),
+    if (s.connected) speakerClock.set({
       uptimeId: 'spUptime',
       heardId: 'spHeard',
       connected: s.connectedSince ? now - Date.parse(s.connectedSince) : null,
       heard: s.at ? now - Date.parse(s.at) : 0,
-    };
-    tick();
+    });
   }
 
   // The loudness slider: shows Santa's level as it moves, and saves it on HQ when let go.
@@ -267,40 +213,6 @@
       $('voiceNote').textContent = "Saved. Press Test Santa's voice to hear it.";
       refreshLive();
     } catch (err) { if (err.message !== 'login') console.error(err); }
-  });
-
-  // The train driver: only between mail runs, and only once the hub is awake. Stop always works.
-  let trainState = null;
-  function renderDriver(s) {
-    trainState = s;
-    const slider = $('speed');
-    const awake = !!s?.hubConnected;
-    const canDrive = awake && !s.busy;
-    const max = s?.maxSpeed || 70; // an older signal box doesn't say: its default cap
-    slider.max = max;
-    $('speedMax').textContent = max;
-    if (s?.speed > 0 && !s.busy && document.activeElement !== slider) slider.value = s.speed;
-    if (+slider.value > max) slider.value = max;
-    $('speedOut').textContent = slider.value;
-    slider.disabled = $('driveStart').disabled = !canDrive;
-    document.querySelectorAll('.driver [data-cmd^="Lights"]').forEach(b => b.disabled = !awake);
-    $('disconnect').disabled = !awake;
-    $('connect').disabled = !s || awake;
-    $('driverNote').textContent = !s ? 'The signal box isn\'t answering.'
-      : !awake ? 'Connect the train first.'
-      : s.busy ? 'On a mail run: the driver takes over once it\'s back.' : '';
-  }
-
-  async function drive(speed) {
-    await api('/train/Drive?speed=' + speed, { method: 'POST' });
-    setTimeout(refresh, 600);
-  }
-
-  // While the train moves, letting go of the slider changes its speed.
-  $('speed').addEventListener('input', e => { $('speedOut').textContent = e.target.value; });
-  $('speed').addEventListener('change', async e => {
-    if (!(trainState?.speed > 0) || trainState.busy) return; // standing still: Start sends the speed
-    try { await drive(+e.target.value); } catch (err) { if (err.message !== 'login') console.error(err); }
   });
 
   function renderAlerts(wishes) {
@@ -339,12 +251,6 @@
     const b = e.target.closest('button');
     if (!b) return;
     try {
-      if (b.dataset.cmd) { await api('/train/' + b.dataset.cmd, { method: 'POST' }); setTimeout(refresh, 800); }
-      if (b.dataset.drive !== undefined) {
-        const speed = +$('speed').value;
-        if (speed === 0) $('driverNote').textContent = 'Set a speed above 0 first.';
-        else await drive(speed);
-      }
       if (b.dataset.replay) await api(`/wishes/${b.dataset.replay}/replay`, { method: 'POST' });
       if (b.id === 'speakerConnect' || b.id === 'speakerDisconnect') {
         b.disabled = true;
@@ -375,7 +281,7 @@
   async function refreshLive() {
     try {
       const [train, speaker] = await Promise.all([api('/train').then(r => r.json()), api('/speaker').then(r => r.json())]);
-      renderTrain(train);
+      panel.render(train);
       renderSpeaker(speaker);
     }
     catch (e) { if (e.message !== 'login') console.error(e); }

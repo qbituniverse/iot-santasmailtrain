@@ -5,6 +5,7 @@
 # a CRLF script fails in bash, and systemd would read the \r into each setting.
 *.sh      text eol=lf
 *.service text eol=lf
+*.timer   text eol=lf
 
 # Visual Studio's solution file expects CRLF.
 *.sln     text eol=crlf

@@ -18,6 +18,7 @@ A child scans their own QR card, printed or **built from LEGO tiles**, and a wis
 - [Wiring the track](#wiring-the-track)
 - [Configuration](#configuration)
 - [Deploying to the Raspberry Pi](#deploying-to-the-raspberry-pi)
+- [Backups](#backups)
 - [Using it](#using-it)
 - [Safety](#safety)
 - [Troubleshooting](#troubleshooting)
@@ -44,7 +45,7 @@ One Raspberry Pi 5 beside the track runs two services that talk MQTT to each oth
 | `NorthPole.Messaging` | Pi 5 | A small MQTTnet wrapper: typed publish/subscribe, auto-reconnect, and an optional embedded broker. |
 | `NorthPole.Hq` | Pi 5 | ASP.NET Core: the children's pages, the parents' dashboard, QR cards and LEGO plans, Claude, Piper, JSON storage. |
 | `NorthPole.SignalBox` | Pi 5 | A worker service: drives the train, reads the sensors, moves the servo, shows each run on the station board, and enforces speed limits and timeouts. |
-| `deploy/` | your computer, then the Pi | `publish.sh` (or `publish.ps1` on Windows) builds both apps and copies them over SSH; `pi/setup.sh`, the systemd units and the Echo scripts set up the Pi. |
+| `deploy/` | your computer, then the Pi | `publish.sh` (or `publish.ps1` on Windows) builds both apps and copies them over SSH; `pi/setup.sh`, the systemd units and the Echo scripts set up the Pi; `backup.ps1`, `restore.ps1` and `pi/backup.sh` keep the Pi's own data safe. |
 
 ### The journey of one wish
 
@@ -387,9 +388,30 @@ Set `Santa:Language` (for example, "Polish"), download a matching [Piper voice](
 **For grown-ups**
 
 - Each morning, park the train at the mailbox and press its green button. Swap the six AAA batteries when the dashboard shows them low.
-- The dashboard (`http://np.local/elves`) has the train's status (how long the hub has been connected, its battery in percent and volts, and how fresh the news is, updated every few seconds), **Connect** and **Disconnect** for the train's hub, **Test run** and **Stop run**, a **Train driver** (Start, Stop, a speed slider in steps of 10 up to `MaxSpeed`, and the lights); **Santa's speaker** (a Chromecast one's link and how long it has held, its volume and Santa's, **Connect** and **Disconnect**, a slider for **Santa's loudness**, and **Test Santa's voice**, with a box for your own words); each child's **Extra wish today**; the shopping list; and every letter with its mood and Santa's reply. A worried or sad letter shows as an alert at the top.
+- The dashboard (`http://np.local/elves`) has the train's status (how long the hub has been connected, its battery in percent and volts, and how fresh the news is, updated every few seconds), **Connect** and **Disconnect** for the train's hub, **Test run** and **Stop run**, a **Train driver** (Forward, Reverse and Stop, a speed slider in steps of 10 up to `MaxSpeed`, and the lights); **Santa's speaker** (a Chromecast one's link and how long it has held, its volume and Santa's, **Connect** and **Disconnect**, a slider for **Santa's loudness**, and **Test Santa's voice**, with a box for your own words); each child's **Extra wish today**; the shopping list; and every letter with its mood and Santa's reply. A worried or sad letter shows as an alert at the top.
+- **The Train Driver card** on **QR cards & LEGO plans** opens `http://np.local/driver`: the train's status, **Connect** and **Disconnect**, and the driver's Forward, Reverse, Stop, speed and lights, with no PIN and no Test run. Anyone on the home Wi-Fi with the card can drive; the signal box keeps its speed cap, won't drive during a mail run, and brakes if HQ goes quiet. **Stop** works there too, and ends a mail run as it does on the dashboard.
 - **Lost card?** On **QR cards & LEGO plans**, click **Lost this card? Make a new code** under it. The old card and its LEGO mosaic stop working at once, and the new card is ready to print.
 - **After a power cut** everything starts by itself, and today's unfinished letters carry on. If the dashboard shows the train Offline, press its green button, and make sure it's back at the mailbox before the next letter. For a planned shutdown, use `sudo poweroff` rather than pulling the plug.
+
+## Backups
+
+Some of what matters lives only on the Pi's card: the QR card codes (a new code means a new card and a new LEGO mosaic), every letter with its gift ideas and what's been bought, the drawings and Santa's voice files, and the settings that hold your family. A fresh card starts without them, so keep snapshots off the Pi.
+
+- **On the Pi, every night:** `setup.sh` installs `northpole-backup` and a timer that snapshots HQ's `data/` folder and the settings files into `~/northpole-backups` at 03:15, keeping the newest 14. Those protect against mistakes, but not against losing the card. `bash setup.sh backup` adds just this to a Pi that's already set up.
+- **On your PC, daily:** `.\deploy\backup.ps1 -PiHost pi@np.local` makes a fresh snapshot and copies it to `Documents\NorthPole backups`, keeping the newest 60; `-Schedule` adds a Windows task that does it every evening. Run it by hand too, before you reflash the card. A cloud-synced folder for `-To` gives a copy away from the house as well.
+- **The secrets stay out:** snapshots never hold the Claude key or the PIN from `/etc/northpole/hq.env`. Keep those in your password manager, and keep the family's settings in `appsettings.json` rather than `hq.env`, so snapshots carry them.
+
+To restore, after a fresh card or on a new Pi: publish and run `setup.sh` as usual, then
+
+```powershell
+.\deploy\restore.ps1 -PiHost pi@np.local     # copies the newest snapshot over and prints the line below
+```
+
+```bash
+sudo bash ~/northpole-setup/restore.sh ~/northpole-np-20261215-210000.tar.gz
+```
+
+`restore.sh` stops HQ and the signal box, sets aside what's there in `/var/backups`, unpacks the snapshot and starts them again. Put the key and the PIN back in `hq.env`, and every card works as before.
 
 ## Safety
 
@@ -402,7 +424,7 @@ HQ, and the AI behind it, can only *ask* the signal box to do things. The signal
 - If the signal box stops, its MQTT "last will" tells HQ the train is offline.
 - The dashboard's **Stop run**, and the train driver's **Stop**, brake at once and end the run in progress.
 - **Disconnect** brakes, ends any run, lets the hub go and stops looking for it, so letters go with Rudolph until **Connect**. From start-up, and after Connect, the signal box looks for the hub until it finds it: press the hub's green button if its light isn't flashing.
-- The train driver works only between mail runs, and a letter sent while an elf is driving goes with Rudolph.
+- The train driver works only between mail runs, and a letter sent while an elf is driving goes with Rudolph. A change of direction stops the train first, then pulls away the other way.
 
 The MQTT broker has **no authentication**. Anyone on the same network could ask for a test run, though these limits still apply, so run it on a trusted home network, never a guest or public one. The dashboard is behind a PIN, rate-limited to five tries in five minutes. While Santa plays on a Chromecast speaker, HQ shares that one sound file at a random address (`/cast/…`) for the speaker to fetch, and only until it finishes.
 

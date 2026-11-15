@@ -1,0 +1,11 @@
+[Unit]
+Description=Santa's Mail Train: snapshot the Pi's own data every night
+
+[Timer]
+OnCalendar=*-*-* 03:15
+# Off at 03:15? Then a few minutes after it next starts.
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

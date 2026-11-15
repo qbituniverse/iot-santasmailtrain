@@ -53,15 +53,15 @@
     <section class="qr-card">
       <div>
         <div class="ticket">
-          <h2>${esc(c.name)}'s wish card</h2>
+          <h2>${c.kind === 'driver' ? esc(c.name) : `${esc(c.name)}'s wish card`}</h2>
           ${c.qrSvg}
-          <p>Scan me every day to send<br>Santa your wish!</p>
+          <p>${c.kind === 'driver' ? 'Scan me to drive<br>the mail train!' : 'Scan me every day to send<br>Santa your wish!'}</p>
           <p class="url">${esc(c.url)}</p>
         </div>
-        <div class="actions no-print">
+        ${c.kind === 'driver' ? '' : `<div class="actions no-print">
           <button class="btn secondary" data-new-code="${esc(c.childId)}" data-name="${esc(c.name)}">Lost this card? Make a new code</button>
           <p class="muted" role="status" style="margin:0;flex-basis:100%"></p>
-        </div>
+        </div>`}
       </div>
       <div class="lego">
         <h3 style="margin:0 0 6px">Build it from LEGO</h3>

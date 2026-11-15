@@ -5,13 +5,14 @@
 #   bash setup.sh              everything on this Pi (the usual way)
 #   bash setup.sh hq           only HQ, if the signal box runs on a second Pi
 #   bash setup.sh signalbox    only the signal box, on that second Pi (a Pi 4 works too)
+#   bash setup.sh backup       only the nightly snapshots (part of everything and of hq)
 # Assumes 64-bit Raspberry Pi OS (Bookworm or later), with the apps already copied to ~/northpole-hq and
 # ~/northpole-signalbox by publish.sh. Running it again is safe: it keeps the settings you've edited.
 set -euo pipefail
 
 ROLE=${1:-all}
-case "$ROLE" in all | hq | signalbox) ;; *) echo "Usage: bash setup.sh [all|hq|signalbox]"; exit 1 ;; esac
-want() { [[ $ROLE == all || $ROLE == "$1" ]]; }
+case "$ROLE" in all | hq | signalbox | backup) ;; *) echo "Usage: bash setup.sh [all|hq|signalbox|backup]"; exit 1 ;; esac
+want() { [[ $ROLE == all || $ROLE == "$1" ]] || [[ $1 == backup && $ROLE == hq ]]; }
 CONFIG=/boot/firmware/config.txt
 
 # Copies a published app in, but keeps any settings file already there, so a second run loses no edits.
@@ -24,10 +25,12 @@ install_app() {
   done
 }
 
-echo "== .NET 10 (ASP.NET Core runtime, which also hosts the signal box)"
-curl -sSL https://dot.net/v1/dotnet-install.sh | sudo bash /dev/stdin --channel 10.0 --runtime aspnetcore --install-dir /opt/dotnet
-sudo ln -sf /opt/dotnet/dotnet /usr/local/bin/dotnet
-sudo apt-get update -qq
+if want hq || want signalbox; then
+  echo "== .NET 10 (ASP.NET Core runtime, which also hosts the signal box)"
+  curl -sSL https://dot.net/v1/dotnet-install.sh | sudo bash /dev/stdin --channel 10.0 --runtime aspnetcore --install-dir /opt/dotnet
+  sudo ln -sf /opt/dotnet/dotnet /usr/local/bin/dotnet
+  sudo apt-get update -qq
+fi
 
 if want hq; then
   echo "== Hostname 'np' so phones can reach http://np.local (keeps the QR code small enough for LEGO)"
@@ -86,6 +89,16 @@ if want signalbox; then
   sudo systemctl enable northpole-signalbox
 fi
 
+if want backup; then
+  echo "== Nightly snapshots of the Pi's own data (card codes, letters, the family's settings) in ~/northpole-backups"
+  sudo install -m 755 backup.sh /usr/local/bin/northpole-backup
+  sed -e "s|__USER__|$USER|" -e "s|__HOME__|$HOME|" northpole-backup.service |
+    sudo tee /etc/systemd/system/northpole-backup.service >/dev/null
+  sudo cp northpole-backup.timer /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now northpole-backup.timer
+fi
+
 echo
 echo "Done. Next:"
 if want hq; then
@@ -98,4 +111,8 @@ if want signalbox; then
   echo "    then press the green button on the locomotive."
 fi
 if want hq; then echo "  - Open http://np.local/elves on your phone, then 'QR cards & LEGO plans'."; fi
+if want backup; then
+  echo "  - Copy the snapshots off the Pi: on the PC, .\deploy\backup.ps1 (add -Schedule to run it daily)."
+  echo "    After a fresh card: setup.sh, then .\deploy\restore.ps1 and the sudo line it prints."
+fi
 echo "  Logs: journalctl -u northpole-hq -u northpole-signalbox -f"
