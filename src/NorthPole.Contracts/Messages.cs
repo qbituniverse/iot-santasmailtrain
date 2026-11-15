@@ -45,7 +45,11 @@ public sealed record MailProgress(Guid WishId, MailStage Stage, string? Detail, 
 
 public sealed record ReturnHome(Guid WishId);
 
+/// <param name="BatteryPercent">The hub's own battery reading, as LEGO works it out.</param>
 /// <param name="MaxSpeed">The signal box's speed cap, so the dashboard's speed slider can stop there.</param>
+/// <param name="BatteryVolts">The hub's measured battery voltage: six fresh AA or AAA cells give about 9 V.</param>
+/// <param name="ConnectedSince">When the hub connected, so the dashboard can show how long it has been.</param>
+/// <param name="LowBatteryPercent">Below this the signal box turns letters away, so the dashboard can say why.</param>
 public sealed record TrainState(
     bool HubConnected,
     int? BatteryPercent,
@@ -54,7 +58,10 @@ public sealed record TrainState(
     string TrainMode,
     string TracksideMode,
     DateTimeOffset At,
-    int MaxSpeed = 0);
+    int MaxSpeed = 0,
+    double? BatteryVolts = null,
+    DateTimeOffset? ConnectedSince = null,
+    int LowBatteryPercent = 0);
 
 /// <summary>
 /// Stop brakes and ends the mail run in progress. Drive is the dashboard's train driver: it sets the motor to

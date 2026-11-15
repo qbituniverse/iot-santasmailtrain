@@ -42,7 +42,7 @@
           </div>
           <label class="speed" for="speed">
             <span>Speed <output id="speedOut" for="speed">30</output> of <span id="speedMax">70</span></span>
-            <input type="range" id="speed" min="0" max="70" step="5" value="30">
+            <input type="range" id="speed" min="0" max="70" step="10" value="30">
           </label>
           <div class="actions">
             <button class="btn secondary" data-cmd="LightsOn">Lights on</button>
@@ -114,17 +114,55 @@
       `<button class="btn secondary" data-extra="${esc(c.id)}">Extra wish today for ${esc(c.name)}</button>`).join('');
   }
 
+  // The signal box publishes every 10 s and on every change; a state older than this means it has gone quiet.
+  const QuietAfterMs = 30000;
+  const hms = ms => {
+    const t = Math.max(0, Math.floor(ms / 1000));
+    return `${Math.floor(t / 3600)}:${String(Math.floor(t / 60) % 60).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+  };
+  const ago = ms => { const t = Math.max(0, Math.round(ms / 1000)); return t < 90 ? `${t} s` : `${Math.round(t / 60)} min`; };
+
+  // Ages measured on the Pi's clock at fetch time, then counted on from there, so the phone's clock doesn't matter.
+  let clock = null;
+  function tick() {
+    if (!clock) return;
+    const since = performance.now() - clock.fetched;
+    if (clock.connected != null && $('uptime')) $('uptime').textContent = hms(clock.connected + since);
+    const heard = clock.heard + since;
+    if ($('heard')) {
+      $('heard').textContent = ago(heard);
+      $('heard').parentElement.classList.toggle('stale', heard > QuietAfterMs);
+    }
+  }
+  setInterval(tick, 1000);
+
   function renderTrain(t) {
     const s = t.state;
-    renderDriver(t.mqttConnected ? s : null);
+    const now = Date.parse(t.now);
+    const quiet = s && now - Date.parse(s.at) > QuietAfterMs;
+    renderDriver(t.mqttConnected && !quiet ? s : null);
+    clock = null;
     if (!t.mqttConnected) { $('trainStatus').innerHTML = '<span class="pill bad">MQTT offline</span>'; return; }
     if (!s) { $('trainStatus').innerHTML = '<span class="pill bad">Signal box not seen yet</span>'; return; }
-    const battery = s.batteryPercent == null ? '?' : s.batteryPercent + '%';
+    const awake = s.hubConnected && !quiet;
+    const low = s.batteryPercent != null && s.batteryPercent < s.lowBatteryPercent;
+    const battery = (s.batteryPercent == null ? '?' : s.batteryPercent + '%') + (s.batteryVolts == null ? '' : ` · ${s.batteryVolts.toFixed(1)} V`);
     const doing = s.busy ? 'On a run' : s.speed ? `Driving at ${s.speed}` : 'Waiting';
+    const link = quiet ? '<span class="pill bad">Signal box quiet</span>'
+      : awake ? '<span class="pill ok">Connected <span id="uptime"></span></span>'
+      : '<span class="pill bad">Train asleep</span>';
     $('trainStatus').innerHTML =
-      `<span class="pill ${t.online ? 'ok' : 'bad'}">${t.online ? 'Online' : 'Offline'}</span> ` +
-      `<span class="pill">Battery ${esc(battery)}</span> <span class="pill">${esc(doing)}</span>` +
-      `<div class="muted" style="margin-top:6px">Train: ${esc(s.trainMode)} · Track: ${esc(s.tracksideMode)}</div>`;
+      `${link} <span class="pill ${low ? 'bad' : ''}">Battery ${esc(battery)}</span> <span class="pill">${esc(doing)}</span>` +
+      (low && awake ? `<div class="muted" style="margin-top:6px">Below ${s.lowBatteryPercent}% the train turns letters away ` +
+        '(Rudolph carries them) and Test run won\'t start.</div>' : '') +
+      `<div class="muted" style="margin-top:6px">Train: ${esc(s.trainMode)} · Track: ${esc(s.tracksideMode)} · ` +
+      `<span>updated <span id="heard"></span> ago</span></div>`;
+    clock = {
+      fetched: performance.now(),
+      heard: now - Date.parse(s.at),
+      connected: awake && s.connectedSince ? now - Date.parse(s.connectedSince) : null,
+    };
+    tick();
   }
 
   // The train driver: only between mail runs, and only once the hub is awake. Stop always works.
@@ -212,8 +250,16 @@
     await api(`/wishes/${box.dataset.wish}/gifts/${box.dataset.gift}`, { method: 'POST', body: JSON.stringify({ bought: box.checked }) });
   });
 
+  // The train every 3 s, the letters every 15 s, and everything at once when the phone comes back to the page.
+  async function refreshTrain() {
+    try { renderTrain(await api('/train').then(r => r.json())); }
+    catch (e) { if (e.message !== 'login') console.error(e); }
+  }
+  const showing = () => !$('app').hidden && !document.hidden;
   refresh();
-  setInterval(() => { if (!$('app').hidden) refresh(); }, 10000);
+  setInterval(() => { if (showing()) refreshTrain(); }, 3000);
+  setInterval(() => { if (showing()) refresh(); }, 15000);
+  document.addEventListener('visibilitychange', () => { if (showing()) refresh(); });
 })();
 </script>
 </body>

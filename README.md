@@ -372,7 +372,7 @@ Set `Santa:Language` (for example, "Polish"), download a matching [Piper voice](
 **For grown-ups**
 
 - Each morning, park the train at the mailbox and press its green button. Swap the six AAA batteries when the dashboard shows them low.
-- The dashboard (`http://np.local/elves`) has the train's status, **Test run** and **Stop run**, a **Train driver** (Start, Stop, a speed slider up to `MaxSpeed`, and the lights); each child's **Extra wish today**; the shopping list; and every letter with its mood and Santa's reply. A worried or sad letter shows as an alert at the top.
+- The dashboard (`http://np.local/elves`) has the train's status (how long the hub has been connected, its battery in percent and volts, and how fresh the news is, updated every few seconds), **Test run** and **Stop run**, a **Train driver** (Start, Stop, a speed slider in steps of 10 up to `MaxSpeed`, and the lights); each child's **Extra wish today**; the shopping list; and every letter with its mood and Santa's reply. A worried or sad letter shows as an alert at the top.
 - **Lost card?** On **QR cards & LEGO plans**, click **Lost this card? Make a new code** under it. The old card and its LEGO mosaic stop working at once, and the new card is ready to print.
 - **After a power cut** everything starts by itself, and today's unfinished letters carry on. If the dashboard shows the train Offline, press its green button, and make sure it's back at the mailbox before the next letter. For a planned shutdown, use `sudo poweroff` rather than pulling the plug.
 

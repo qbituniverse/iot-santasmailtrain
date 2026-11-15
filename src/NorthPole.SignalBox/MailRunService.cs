@@ -43,6 +43,7 @@ public sealed class MailRunService : BackgroundService
         mqtt.On<MailDispatch>(Topics.Dispatch, OnDispatchAsync);
         mqtt.On<ReturnHome>(Topics.ReturnHome, OnReturnHome);
         mqtt.On<TrainCommand>(Topics.Command, OnCommandAsync);
+        train.StatusChanged += () => _ = PublishStateQuietlyAsync(); // a dropped hub or a new battery reading: tell HQ now
         mqtt.ConnectionChanged += connected =>
         {
             if (connected)
@@ -346,5 +347,11 @@ public sealed class MailRunService : BackgroundService
 
     Task PublishStateAsync() => _mqtt.PublishAsync(Topics.TrainState, new TrainState(
         _train.IsConnected, _train.BatteryPercent, _speed, _currentWish is not null, _train.Mode, _track.Mode, DateTimeOffset.Now,
-        Math.Clamp(_o.Train.MaxSpeed, 0, 100)), retain: true);
+        Math.Clamp(_o.Train.MaxSpeed, 0, 100), _train.BatteryVolts, _train.ConnectedSince, _o.Train.LowBatteryPercent), retain: true);
+
+    async Task PublishStateQuietlyAsync()
+    {
+        try { await PublishStateAsync(); }
+        catch (Exception ex) { _log.LogDebug(ex, "State publish failed"); } // the next regular publish catches up
+    }
 }
