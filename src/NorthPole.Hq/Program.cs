@@ -5,6 +5,8 @@ using Anthropic;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using NorthPole.Contracts;
@@ -255,9 +257,10 @@ elves.MapPost("/speaker/loudness", (double above, SantaLoudness loudness) =>
     return Results.Ok();
 });
 
-// The dashboard's speaker check: Santa says a short line on the station speaker, and the answer says where.
-elves.MapPost("/voice/test", async (SantaVoice voice, CancellationToken ct) =>
-    await voice.TestStationAsync(ct) is { } speaker
+// The dashboard's speaker check: Santa says the elf's words, or his usual line, on the station speaker; the answer says where.
+elves.MapPost("/voice/test", async ([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] VoiceTestRequest? test,
+        SantaVoice voice, CancellationToken ct) =>
+    await voice.TestStationAsync(test?.Text, ct) is { } speaker
         ? Results.Ok(new { speaker })
         : Results.Problem("Santa couldn't speak: is Piper running, and is PlayOnStation on?", statusCode: 503));
 
@@ -302,3 +305,4 @@ app.Run();
 
 record LoginRequest(string? Pin);
 record BoughtRequest(bool Bought);
+record VoiceTestRequest(string? Text);

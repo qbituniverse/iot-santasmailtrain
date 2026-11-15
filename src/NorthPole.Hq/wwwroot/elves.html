@@ -66,6 +66,9 @@
           <span>Santa's loudness: the volume + <output id="loudnessOut" for="loudness">15</output></span>
           <input type="range" id="loudness" min="0" max="30" step="5" value="15" disabled>
         </label>
+        <textarea class="voice-text" id="voiceText" rows="2" maxlength="300"
+          placeholder="Ho ho ho! This is Santa, checking the speaker at the North Pole. Can you hear me?"
+          aria-label="What Santa says in the test. Leave it empty for his usual line."></textarea>
         <div class="actions">
           <button class="btn secondary" id="voiceTest">Test Santa's voice</button>
         </div>
@@ -352,7 +355,7 @@
         b.disabled = true;
         $('voiceNote').textContent = 'Santa is speaking…';
         try {
-          const res = await api('/voice/test', { method: 'POST' });
+          const res = await api('/voice/test', { method: 'POST', body: JSON.stringify({ text: $('voiceText').value }) });
           $('voiceNote').textContent = res.ok
             ? `Santa spoke on ${(await res.json()).speaker}.`
             : 'Santa couldn\'t speak: is Piper running?';
