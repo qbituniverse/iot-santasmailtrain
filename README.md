@@ -44,7 +44,7 @@ One Raspberry Pi 5 beside the track runs two services that talk MQTT to each oth
 | `NorthPole.Messaging` | Pi 5 | A small MQTTnet wrapper: typed publish/subscribe, auto-reconnect, and an optional embedded broker. |
 | `NorthPole.Hq` | Pi 5 | ASP.NET Core: the children's pages, the parents' dashboard, QR cards and LEGO plans, Claude, Piper, JSON storage. |
 | `NorthPole.SignalBox` | Pi 5 | A worker service: drives the train, reads the sensors, moves the servo, shows each run on the station board, and enforces speed limits and timeouts. |
-| `deploy/` | your computer, then the Pi | `publish.sh` builds both apps and copies them over SSH; `pi/setup.sh`, the systemd units and the Echo scripts set up the Pi. |
+| `deploy/` | your computer, then the Pi | `publish.sh` (or `publish.ps1` on Windows) builds both apps and copies them over SSH; `pi/setup.sh`, the systemd units and the Echo scripts set up the Pi. |
 
 ### The journey of one wish
 
@@ -302,6 +302,10 @@ The Pi's default hostname is `np`, which keeps the QR address short. Replace `yo
    ```bash
    PI_HOST=you@np.local bash deploy/publish.sh
    ```
+   On Windows, without WSL, the PowerShell twin does the same with the `ssh`, `scp` and `tar` that come with Windows:
+   ```powershell
+   .\deploy\publish.ps1 -PiHost you@np.local
+   ```
 4. **Wire the track** with the Pi switched off, as described in [Wiring the track](#wiring-the-track).
 5. **Run the setup.** It installs the .NET 10 runtime, Piper with a British voice, libgpiod (the Pi 5 reaches its GPIO through it), BlueZ, the servo's PWM overlay, and the three services. Then add your secrets and your family, and reboot:
    ```bash
@@ -320,7 +324,7 @@ Logs: `journalctl -u northpole-hq -u northpole-signalbox -f`.
 
 ### Updating
 
-Run `publish.sh` again, then on the Pi copy the new builds in and restart. The `--exclude` keeps your settings:
+Run `publish.sh` (or `publish.ps1`) again, then on the Pi copy the new builds in and restart. The `--exclude` keeps your settings:
 
 ```bash
 sudo rsync -a --exclude 'appsettings*.json' ~/northpole-hq/ /opt/northpole/hq/ && sudo systemctl restart northpole-hq
