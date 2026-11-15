@@ -20,6 +20,9 @@ public static class Topics
 
     /// <summary>HQ → SignalBox: manual commands from the parents' dashboard.</summary>
     public const string Command = "northpole/train/command";
+
+    /// <summary>HQ → SignalBox (retained): settings saved from the dashboard, such as the standby time.</summary>
+    public const string TrainSettings = "northpole/train/settings";
 }
 
 public enum MailStage
@@ -54,6 +57,10 @@ public sealed record ReturnHome(Guid WishId);
 /// The signal box is looking for the hub, so pressing its green button connects it. It does from start-up and after
 /// a Connect, and stops after a Disconnect.
 /// </param>
+/// <param name="IdleMinutes">The standby time the signal box is using; 0 never lets the hub go.</param>
+/// <param name="SleepAt">When it will let the hub go if nothing happens before then; null while driving, on a run,
+/// or with no standby.</param>
+/// <param name="Asleep">It let the hub go after the standby time, rather than at a Disconnect.</param>
 public sealed record TrainState(
     bool HubConnected,
     int? BatteryPercent,
@@ -66,7 +73,10 @@ public sealed record TrainState(
     double? BatteryVolts = null,
     DateTimeOffset? ConnectedSince = null,
     int LowBatteryPercent = 0,
-    bool Listening = false);
+    bool Listening = false,
+    int IdleMinutes = 0,
+    DateTimeOffset? SleepAt = null,
+    bool Asleep = false);
 
 /// <summary>
 /// Stop brakes and ends the mail run in progress. Drive is the train driver: it sets the motor to
@@ -76,6 +86,10 @@ public sealed record TrainState(
 public enum TrainCommandKind { Stop, TestRun, LightsOn, LightsOff, Whistle, Drive, Connect, Disconnect }
 
 public sealed record TrainCommand(TrainCommandKind Kind, int? Speed = null);
+
+/// <param name="IdleMinutes">After this long with nothing happening, the signal box lets the hub go so it can switch
+/// itself off and save its batteries. 0 never does.</param>
+public sealed record TrainSettings(int IdleMinutes);
 
 public static class NorthPoleJson
 {

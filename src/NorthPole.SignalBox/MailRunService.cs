@@ -40,6 +40,13 @@ public sealed class MailRunService : BackgroundService
     long _stillSince = Environment.TickCount64; // when the motor last stopped or changed
     double? _restingVolts;
 
+    // Standby: after IdleMinutes with nothing happening, the hub is let go so it switches itself off and saves its
+    // batteries (it draws about 70 mA just waiting). Driving, a letter, a run, any command and a new connection all
+    // count as something. Connect wakes it again, with the hub's green button once it has switched off.
+    volatile int _idleMinutes;
+    long _lastActivity = Environment.TickCount64;
+    volatile bool _asleep; // let go after the standby time, rather than at a Disconnect
+
     public MailRunService(IOptions<SignalBoxOptions> options, ITrain train, ITrackside track, MqttLink mqtt,
         StationBoard board, ILogger<MailRunService> log)
     {
@@ -49,8 +56,10 @@ public sealed class MailRunService : BackgroundService
         _mqtt = mqtt;
         _board = board;
         _log = log;
+        _idleMinutes = Math.Clamp(_o.Train.IdleMinutes, 0, MostIdleMinutes);
 
         mqtt.On<MailDispatch>(Topics.Dispatch, OnDispatchAsync);
+        mqtt.On<TrainSettings>(Topics.TrainSettings, OnSettingsAsync);
         mqtt.On<ReturnHome>(Topics.ReturnHome, OnReturnHome);
         mqtt.On<TrainCommand>(Topics.Command, OnCommandAsync);
         train.StatusChanged += () =>
@@ -75,6 +84,7 @@ public sealed class MailRunService : BackgroundService
 
     async Task OnDispatchAsync(MailDispatch job)
     {
+        Active();
         if (!_train.IsConnected)
         {
             await ReportAsync(job, MailStage.Rejected, "The train is asleep (LEGO hub not connected)");
@@ -111,6 +121,7 @@ public sealed class MailRunService : BackgroundService
     async Task OnCommandAsync(TrainCommand cmd)
     {
         var ct = CancellationToken.None;
+        Active();
         switch (cmd.Kind)
         {
             case TrainCommandKind.Stop:
@@ -164,20 +175,24 @@ public sealed class MailRunService : BackgroundService
             case TrainCommandKind.Connect:
                 _log.LogInformation("Connect from the dashboard: looking for the hub, press its green button");
                 _listening = true;
+                _asleep = false;
                 Wake();
                 await PublishStateAsync();
                 break;
             case TrainCommandKind.Disconnect:
-                await DisconnectAsync();
+                await DisconnectAsync("Disconnect from the dashboard");
                 break;
         }
     }
 
-    /// <summary>The dashboard's Disconnect: stop looking for the hub, end any run like Stop, then let the hub go.</summary>
-    async Task DisconnectAsync()
+    /// <summary>
+    /// The dashboard's Disconnect, or the standby: stop looking for the hub, end any run like Stop, then let the hub go.
+    /// </summary>
+    async Task DisconnectAsync(string why, bool asleep = false)
     {
-        _log.LogInformation("Disconnect from the dashboard");
+        _log.LogInformation("{Why}", why);
         _listening = false;
+        _asleep = asleep;
         try { _scan?.Cancel(); } // a search in progress gives up
         catch (ObjectDisposedException) { } // it had just finished
         try { _run?.Cancel(); }
@@ -195,6 +210,39 @@ public sealed class MailRunService : BackgroundService
             _log.LogWarning("The hub didn't disconnect cleanly ({Message})", ex.Message);
         }
         await PublishStateAsync();
+    }
+
+    const int MostIdleMinutes = 240;
+
+    void Active() => Volatile.Write(ref _lastActivity, Environment.TickCount64);
+
+    /// <summary>HQ's saved standby time (retained, so it arrives at every start too).</summary>
+    Task OnSettingsAsync(TrainSettings settings)
+    {
+        var minutes = Math.Clamp(settings.IdleMinutes, 0, MostIdleMinutes);
+        if (minutes != _idleMinutes)
+            _log.LogInformation("Standby: {Standby}", minutes == 0 ? "never" : $"after {minutes} min with nothing happening");
+        _idleMinutes = minutes;
+        Active(); // counted from now, so a shorter time doesn't put the hub to sleep at once
+        return PublishStateQuietlyAsync();
+    }
+
+    /// <summary>Lets the hub go once the standby time has passed with the train standing, no run and nothing asked.</summary>
+    async Task SleepIfIdleAsync()
+    {
+        var minutes = _idleMinutes;
+        if (minutes == 0 || !_train.IsConnected || !_listening || _speed != 0 || _currentWish is not null) return;
+        if (Environment.TickCount64 - Volatile.Read(ref _lastActivity) < minutes * 60_000L) return;
+        await DisconnectAsync($"Standby: nothing for {minutes} min, so the hub goes to sleep to save its batteries", asleep: true);
+    }
+
+    /// <summary>When the standby will let the hub go if nothing happens first; null when it can't.</summary>
+    DateTimeOffset? SleepAt()
+    {
+        var minutes = _idleMinutes;
+        if (minutes == 0 || !_train.IsConnected || !_listening || _speed != 0 || _currentWish is not null) return null;
+        var left = minutes * 60_000L - (Environment.TickCount64 - Volatile.Read(ref _lastActivity));
+        return DateTimeOffset.Now.AddMilliseconds(Math.Max(0, left));
     }
 
     void Wake()
@@ -240,6 +288,7 @@ public sealed class MailRunService : BackgroundService
             {
                 _run = null;
                 _currentWish = null;
+                Active();
                 _track.SetFlag(false);
                 _track.SetSignal(SignalAspect.Red);
                 await PublishStateAsync();
@@ -338,6 +387,7 @@ public sealed class MailRunService : BackgroundService
     {
         if (speed != 0 || _speed != 0) Volatile.Write(ref _stillSince, Environment.TickCount64);
         _speed = speed;
+        Active();
     }
 
     /// <summary>Standing still long enough for the batteries to recover from the motor's load.</summary>
@@ -408,6 +458,8 @@ public sealed class MailRunService : BackgroundService
                     }
                     else
                     {
+                        _asleep = false;
+                        Active();
                         await _train.SetLightAsync(30, ct);
                     }
                 }
@@ -437,6 +489,7 @@ public sealed class MailRunService : BackgroundService
         {
             try
             {
+                await SleepIfIdleAsync();
                 if (_train.IsConnected && _currentWish is null && Resting) await _train.RefreshBatteryAsync(ct);
                 await PublishStateAsync();
             }
@@ -452,7 +505,7 @@ public sealed class MailRunService : BackgroundService
     Task PublishStateAsync() => _mqtt.PublishAsync(Topics.TrainState, new TrainState(
         _train.IsConnected, _train.BatteryPercent, _speed, _currentWish is not null, _train.Mode, _track.Mode, DateTimeOffset.Now,
         Math.Clamp(_o.Train.MaxSpeed, 0, 100), RestingVolts(), _train.ConnectedSince, _o.Train.LowBatteryPercent,
-        _listening), retain: true);
+        _listening, _idleMinutes, SleepAt(), _asleep), retain: true);
 
     async Task PublishStateQuietlyAsync()
     {
