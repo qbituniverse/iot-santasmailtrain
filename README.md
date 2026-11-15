@@ -188,8 +188,8 @@ Then, on the Pi:
 ```bash
 ~/northpole-bench/NorthPole.SignalBox bench signal             # red 3 s, green 3 s, four swaps, then off
 ~/northpole-bench/NorthPole.SignalBox bench signal green 10    # hold one aspect
-~/northpole-bench/NorthPole.SignalBox bench wait 30            # count magnet passes at the North Pole contact
-~/northpole-bench/NorthPole.SignalBox bench distance 30        # live readings from the mailbox HC-SR04
+~/northpole-bench/NorthPole.SignalBox bench wait               # count magnet passes at the North Pole contact for 60 s
+~/northpole-bench/NorthPole.SignalBox bench distance           # live readings from the mailbox HC-SR04 for 60 s
 ~/northpole-bench/NorthPole.SignalBox bench flag               # the mailbox flag: down, up, down, up, down
 ~/northpole-bench/NorthPole.SignalBox bench flag duty 0.06     # hold any position, to tune FlagUpDuty and FlagDownDuty
 ~/northpole-bench/NorthPole.SignalBox bench board              # a pretend mail run on the station board, screen by screen
@@ -198,7 +198,7 @@ Then, on the Pi:
 ~/northpole-bench/NorthPole.SignalBox bench train power 30 3   # hold one motor power for 3 s, then brake
 ```
 
-For the train, press the hub's green button so its light flashes, and keep the LEGO remote switched off: the hub takes one connection at a time. Your user needs to be in the `gpio` group, as the first user on Raspberry Pi OS is. The installed copy works the same way: `/opt/northpole/signalbox/NorthPole.SignalBox bench …`.
+The signal LEDs tell you what each test wants. Red means it's waiting for you: bring the magnet or your hand to the sensor, or press the hub's green button. Green means it has seen it, the flag is moving, or the train is connected. For the train, press the hub's green button so its light flashes, and keep the LEGO remote switched off: the hub takes one connection at a time. Your user needs to be in the `gpio` group, as the first user on Raspberry Pi OS is. The installed copy works the same way: `/opt/northpole/signalbox/NorthPole.SignalBox bench …`.
 
 ## Configuration
 
