@@ -1,7 +1,7 @@
 <#
   Copies the signal box to the Pi for the bench test mode, straight from Windows: no WSL or rsync needed.
   It builds a self-contained linux-arm64 copy, so the Pi needs no .NET installed, and puts it in ~/northpole-bench.
-  Nothing is installed as a service; the full setup is still deploy/publish.sh and setup.sh.
+  Nothing is installed as a service; the full setup is deploy/publish.ps1 (or publish.sh) and setup.sh.
 
     .\deploy\bench.ps1                         # to you@np.local, your Windows user name
     .\deploy\bench.ps1 -PiHost pi@np.local
