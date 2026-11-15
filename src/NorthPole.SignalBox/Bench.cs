@@ -134,7 +134,7 @@ public static class Bench
     /// </summary>
     static async Task<int> WaitAsync(string[] args, SignalBoxOptions options, ILoggerFactory loggers, ILogger log, CancellationToken ct)
     {
-        var seconds = args.Length > 0 ? Seconds(args[0]) : 30;
+        var seconds = args.Length > 0 ? Seconds(args[0]) : 60;
         var sensor = options.Trackside.NorthPoleSensor;
         using var track = Open(options, loggers);
         using var window = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -183,7 +183,7 @@ public static class Bench
     /// </summary>
     static async Task<int> DistanceAsync(string[] args, SignalBoxOptions options, ILoggerFactory loggers, ILogger log, CancellationToken ct)
     {
-        var seconds = args.Length > 0 ? Seconds(args[0]) : 30;
+        var seconds = args.Length > 0 ? Seconds(args[0]) : 60;
         var o = options.Trackside.HomeSensor;
         if (o.Kind != SensorKind.Ultrasonic)
             throw new ArgumentException($"The mailbox sensor is set to {o.Kind}, not Ultrasonic (Trackside:HomeSensor:Kind)");

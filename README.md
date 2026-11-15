@@ -188,8 +188,8 @@ Then, on the Pi:
 ```bash
 ~/northpole-bench/NorthPole.SignalBox bench signal             # red 3 s, green 3 s, four swaps, then off
 ~/northpole-bench/NorthPole.SignalBox bench signal green 10    # hold one aspect
-~/northpole-bench/NorthPole.SignalBox bench wait 30            # count magnet passes at the North Pole contact
-~/northpole-bench/NorthPole.SignalBox bench distance 30        # live readings from the mailbox HC-SR04
+~/northpole-bench/NorthPole.SignalBox bench wait               # count magnet passes at the North Pole contact for 60 s
+~/northpole-bench/NorthPole.SignalBox bench distance           # live readings from the mailbox HC-SR04 for 60 s
 ~/northpole-bench/NorthPole.SignalBox bench flag               # the mailbox flag: down, up, down, up, down
 ~/northpole-bench/NorthPole.SignalBox bench flag duty 0.06     # hold any position, to tune FlagUpDuty and FlagDownDuty
 ~/northpole-bench/NorthPole.SignalBox bench board              # a pretend mail run on the station board, screen by screen
