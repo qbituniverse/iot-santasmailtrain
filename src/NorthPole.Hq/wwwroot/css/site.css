@@ -149,6 +149,8 @@ body.elves { background: #f6f3ee; }
 .speed input:disabled { cursor: not-allowed; opacity: 0.5; }
 .driver #driverNote { margin: 8px 0 0; }
 .driver #driverNote:empty { display: none; }
+#voiceNote { margin: 8px 0 0; }
+#voiceNote:empty { display: none; }
 #trainStatus #uptime { font-variant-numeric: tabular-nums; }
 #trainStatus .stale { color: #8f1d1d; font-weight: 600; }
 

@@ -60,6 +60,10 @@
         <div class="stat" id="wishCount">0</div>
         <div class="muted">wishes sent · Claude spend <span id="spend">$0.00</span></div>
         <div class="actions" id="childActions"></div>
+        <div class="actions">
+          <button class="btn secondary" id="voiceTest">Test Santa's voice</button>
+        </div>
+        <p class="muted" id="voiceNote" role="status"></p>
       </section>
       <section class="panel">
         <h2>Shopping list</h2>
@@ -252,6 +256,16 @@
         else await drive(speed);
       }
       if (b.dataset.replay) await api(`/wishes/${b.dataset.replay}/replay`, { method: 'POST' });
+      if (b.id === 'voiceTest') {
+        b.disabled = true;
+        $('voiceNote').textContent = 'Santa is speaking…';
+        try {
+          const res = await api('/voice/test', { method: 'POST' });
+          $('voiceNote').textContent = res.ok
+            ? `Santa spoke on ${(await res.json()).speaker}.`
+            : 'Santa couldn\'t speak: is Piper running?';
+        } finally { b.disabled = false; }
+      }
       if (b.dataset.extra) { await api(`/children/${b.dataset.extra}/extra-wish`, { method: 'POST' }); b.textContent = 'Granted!'; }
     } catch (err) { if (err.message !== 'login') console.error(err); }
   });

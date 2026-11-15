@@ -70,6 +70,22 @@ public sealed class VoiceOptions
     /// <summary>Command used to play a WAV file; the file path is appended.</summary>
     public string PlayCommand { get; set; } = "aplay -q";
 
+    /// <summary>
+    /// A Chromecast speaker on the home network to play Santa on instead, such as a soundbar: its name as the Google
+    /// Home app shows it, or its IP address. Empty plays on the Pi with <see cref="PlayCommand"/>, which is also the
+    /// fallback when the speaker doesn't answer.
+    /// </summary>
+    public string? CastTo { get; set; }
+
+    /// <summary>Santa plays this much above the speaker's current volume (the TV's), on its 0..1 scale.</summary>
+    public double CastVolumeAbove { get; set; } = 0.15;
+
+    /// <summary>Santa's volume on the speaker is never below this, so a quiet TV still lets him be heard.</summary>
+    public double CastVolumeMin { get; set; } = 0.35;
+
+    /// <summary>Santa's volume on the speaker is never above this, unless the TV is already louder.</summary>
+    public double CastVolumeMax { get; set; } = 0.7;
+
     /// <summary>Optional sound played when the train arrives (sleigh bells, a whistle). Relative to the data directory.</summary>
     public string? ArrivalSound { get; set; } = "sounds/arrival.wav";
 }
