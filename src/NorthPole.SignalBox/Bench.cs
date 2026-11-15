@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Extensions.Options;
+using NorthPole.Contracts;
 
 namespace NorthPole.SignalBox;
 
@@ -14,6 +15,8 @@ namespace NorthPole.SignalBox;
 ///   NorthPole.SignalBox bench flag                   the mailbox flag: down, up, down, up, down
 ///   NorthPole.SignalBox bench flag up|down [seconds]
 ///   NorthPole.SignalBox bench flag duty 0.06 [seconds]   any position, to tune FlagUpDuty and FlagDownDuty
+///   NorthPole.SignalBox bench board                  a pretend mail run on the 16x2 station board, screen by screen
+///   NorthPole.SignalBox bench board text "top" ["bottom"] [seconds]
 ///   NorthPole.SignalBox bench train                  the locomotive over Bluetooth: battery, headlights, a slow nudge
 ///   NorthPole.SignalBox bench train power 30 [seconds]   one motor power held (up to MaxSpeed, 60 s at most), then brake
 /// It always uses the real hardware, whatever the Mode settings say: the GPIO, or for the train the Pi's own Bluetooth
@@ -53,6 +56,7 @@ public static class Bench
                 "wait" => await WaitAsync(args[1..], options, loggers, log, stop.Token),
                 "distance" => await DistanceAsync(args[1..], options, log, stop.Token),
                 "flag" => await FlagAsync(args[1..], options, loggers, log, stop.Token),
+                "board" => await BoardAsync(args[1..], options, log, stop.Token),
                 "train" => await TrainAsync(args[1..], options, loggers, log, stop.Token),
                 _ => Usage(log),
             };
@@ -78,7 +82,7 @@ public static class Bench
 
     static int Usage(ILogger log)
     {
-        log.LogInformation("Usage: NorthPole.SignalBox bench signal [red|green|off] [seconds] | bench wait [seconds] | bench distance [seconds] | bench flag [up|down [seconds] | duty 0.06 [seconds]] | bench train [power 30 [seconds]]");
+        log.LogInformation("Usage: NorthPole.SignalBox bench signal [red|green|off] [seconds] | bench wait [seconds] | bench distance [seconds] | bench flag [up|down [seconds] | duty 0.06 [seconds]] | bench board [text \"top\" [\"bottom\"] [seconds]] | bench train [power 30 [seconds]]");
         return 2;
     }
 
@@ -288,6 +292,79 @@ public static class Bench
         }
         await Move(false, 1, "Flag down");
         return 0;
+    }
+
+    /// <summary>
+    /// The 16x2 station board through the app's own StationBoard and LcdBoardDisplay: a pretend mail run, so every
+    /// screen a real run shows appears in turn, or any two lines of text. Either way it ends with the board's own
+    /// "Signal box off", as when the service stops. Opens only the LCD's six pins.
+    /// </summary>
+    static async Task<int> BoardAsync(string[] args, SignalBoxOptions options, ILogger log, CancellationToken ct)
+    {
+        var b = options.Trackside.Board;
+        string? top = null, bottom = null;
+        var seconds = 10.0;
+        if (args.Length > 0)
+        {
+            if (!args[0].Equals("text", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException($"Unknown board command '{args[0]}': use bench board, or bench board text \"top line\" [\"bottom line\"] [seconds]");
+            top = args.Length > 1 ? args[1] : throw new ArgumentException("Give the text to show, for example: bench board text \"Hello North Pole\"");
+            bottom = args.Length > 2 ? args[2] : "";
+            seconds = args.Length > 3 ? Seconds(args[3]) : seconds;
+        }
+
+        log.LogInformation("Station board: RS on GPIO{Rs}, E on GPIO{E}, D4 to D7 on GPIO{D4}, {D5}, {D6} and {D7}",
+            b.RsPin, b.EnablePin, b.D4Pin, b.D5Pin, b.D6Pin, b.D7Pin);
+        using var display = new LcdBoardDisplay(Options.Create(options));
+
+        if (top is not null)
+        {
+            var (t, bt) = (Fit(top), Fit(bottom!));
+            display.Show(t, bt);
+            log.LogInformation("[{Top}] [{Bottom}] for {Seconds} s", Plain(t), Plain(bt), seconds);
+            await Task.Delay(TimeSpan.FromSeconds(seconds), ct);
+            return 0;
+        }
+
+        var board = new StationBoard(Options.Create(options), TimeProvider.System);
+        var line = new LineStatus(HqConnected: true, TrainAwake: true, BatteryPercent: 87);
+        var job = new MailDispatch(Guid.NewGuid(), "Quibble", DateTimeOffset.Now);
+        (MailStage? Stage, double Hold, string What)[] run =
+        [
+            (null, 12, "Waiting for a letter: the bottom line takes turns"),
+            (MailStage.Loading, 4, "Loading the post"),
+            (MailStage.Departed, 7, "On the way to the North Pole: the little train runs along"),
+            (MailStage.Arrived, 4, "At the North Pole"),
+            (MailStage.Returning, 7, "Going home"),
+            (MailStage.Home, 4, "Home again"),
+        ];
+        foreach (var (stage, hold, what) in run)
+        {
+            if (stage is { } s) board.Show(job, s);
+            log.LogInformation("{What}", what);
+            var moving = stage is MailStage.Departed or MailStage.Returning;
+            var shown = new HashSet<string>();
+            var until = Stopwatch.StartNew();
+            while (until.Elapsed < TimeSpan.FromSeconds(hold))
+            {
+                var (t, bt) = board.Render(line);
+                display.Show(t, bt);
+                if ((!moving || shown.Count == 0) && shown.Add(t + bt))
+                    log.LogInformation("  [{Top}] [{Bottom}]", Plain(t), Plain(bt));
+                await Task.Delay(TimeSpan.FromMilliseconds(200), ct);
+            }
+        }
+        log.LogInformation("Done: the board now says it's off");
+        return 0;
+
+        static string Fit(string text)
+        {
+            var lcd = StationBoard.ToLcd(text);
+            return lcd.Length >= StationBoard.Width ? lcd[..StationBoard.Width] : lcd.PadRight(StationBoard.Width);
+        }
+
+        static string Plain(string lcd) =>
+            lcd.Replace(StationBoard.Letter, '@').Replace(StationBoard.Engine, '>').Replace(StationBoard.Tree, '*');
     }
 
     /// <summary>
