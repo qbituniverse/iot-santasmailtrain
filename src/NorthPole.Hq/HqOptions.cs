@@ -77,7 +77,10 @@ public sealed class VoiceOptions
     /// </summary>
     public string? CastTo { get; set; }
 
-    /// <summary>Santa plays this much above the speaker's current volume (the TV's), on its 0..1 scale.</summary>
+    /// <summary>
+    /// Santa plays this much above the speaker's current volume (the TV's), on its 0..1 scale, until the dashboard's
+    /// slider changes it (<see cref="Santa.SantaLoudness"/>).
+    /// </summary>
     public double CastVolumeAbove { get; set; } = 0.15;
 
     /// <summary>Santa's volume on the speaker is never below this, so a quiet TV still lets him be heard.</summary>
@@ -85,10 +88,6 @@ public sealed class VoiceOptions
 
     /// <summary>Santa's volume on the speaker is never above this, unless the TV is already louder.</summary>
     public double CastVolumeMax { get; set; } = 0.7;
-
-    /// <summary>The volume Santa plays at, when the speaker is at <paramref name="current"/>.</summary>
-    public double SantaLevel(double current) =>
-        Math.Round(current >= CastVolumeMax ? current : Math.Clamp(current + CastVolumeAbove, CastVolumeMin, CastVolumeMax), 2);
 
     /// <summary>Optional sound played when the train arrives (sleigh bells, a whistle). Relative to the data directory.</summary>
     public string? ArrivalSound { get; set; } = "sounds/arrival.wav";

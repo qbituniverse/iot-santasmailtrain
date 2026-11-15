@@ -18,7 +18,8 @@ namespace NorthPole.Hq.Santa;
 /// so nothing goes to the internet. Santa plays above the speaker's current volume (the TV's), within limits, and the
 /// volume goes back afterwards. A cast that starts while the TV plays cuts in, and the TV comes back by itself.
 /// </summary>
-public sealed class CastSpeaker(IOptions<HqOptions> options, SpeakerLink link, IServer server, ILogger<CastSpeaker> log)
+public sealed class CastSpeaker(IOptions<HqOptions> options, SpeakerLink link, SantaLoudness loudness, IServer server,
+    ILogger<CastSpeaker> log)
 {
     const string MediaReceiver = "CC1AD845"; // Google's Default Media Receiver
     static readonly TimeSpan LongestFile = TimeSpan.FromMinutes(3);
@@ -77,7 +78,7 @@ public sealed class CastSpeaker(IOptions<HqOptions> options, SpeakerLink link, I
         {
             if (before is { } level)
             {
-                var santa = _o.SantaLevel(level);
+                var santa = loudness.LevelFor(level);
                 await cast.RequestAsync("receiver-0", CastChannel.Receiver,
                     new JsonObject { ["type"] = "SET_VOLUME", ["volume"] = new JsonObject { ["level"] = santa } }, ct);
                 volumeSet = true;

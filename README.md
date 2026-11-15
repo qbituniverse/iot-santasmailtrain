@@ -255,7 +255,7 @@ One `KEY=value` per line, with no spaces around `=` and no `export`; `#` starts 
 | `Voice:LengthScale` | `1.15` | Above 1 speaks more slowly. | Plain |
 | `Voice:PlayOnStation`, `Voice:PlayCommand` | `true`, `aplay -q` | Whether and how Santa plays at the station. | Plain |
 | `Voice:CastTo` | empty | A Chromecast speaker to play Santa on instead, by its name in the Google Home app or its IP address. Empty plays on the Pi with `PlayCommand`, which is also the fallback. | Plain |
-| `Voice:CastVolumeAbove`, `CastVolumeMin`, `CastVolumeMax` | `0.15`, `0.35`, `0.7` | Santa plays this far above the speaker's current volume (the TV's), within these limits; the volume goes back after. | Plain |
+| `Voice:CastVolumeAbove`, `CastVolumeMin`, `CastVolumeMax` | `0.15`, `0.35`, `0.7` | Santa plays this far above the speaker's current volume (the TV's), within these limits; the volume goes back after. The dashboard's loudness slider changes how far above (0 to 0.3) and keeps it in `data/santa-loudness.json`. | Plain |
 | `Voice:ArrivalSound` | `sounds/arrival.wav` | A jingle before Santa speaks, inside `data/`. | Plain |
 | `Qr:BaseUrl` | `http://np.local` | The address in every QR code. Change it before printing, only if phones can't reach `np.local`. | Plain |
 | `Qr:BaseplateStuds` | `32` | The baseplate size for the LEGO plan. | Plain |
@@ -346,7 +346,7 @@ sudo systemctl restart northpole-hq
 
 Santa cuts in on whatever the speaker is playing, 15 points above its volume (between 35% and 70%), and the TV comes back by itself after. A TV with Chromecast is a Chromecast too, which is why the speaker goes by name. If the speaker doesn't answer, Santa plays on the Pi with `PlayCommand` instead.
 
-HQ keeps a link to the speaker from start-up, so the dashboard's **Santa's speaker** panel shows whether it answers and since when, its volume, and the volume Santa will play at. **Disconnect** closes the link and keeps Santa on the Pi until **Connect**.
+HQ keeps a link to the speaker from start-up, so the dashboard's **Santa's speaker** panel shows whether it answers and since when, its volume, and the volume Santa will play at, with a slider for how far above the TV he plays. **Disconnect** closes the link and keeps Santa on the Pi until **Connect**.
 
 ### Santa's voice on an Amazon Echo
 
@@ -387,7 +387,7 @@ Set `Santa:Language` (for example, "Polish"), download a matching [Piper voice](
 **For grown-ups**
 
 - Each morning, park the train at the mailbox and press its green button. Swap the six AAA batteries when the dashboard shows them low.
-- The dashboard (`http://np.local/elves`) has the train's status (how long the hub has been connected, its battery in percent and volts, and how fresh the news is, updated every few seconds), **Connect** and **Disconnect** for the train's hub, **Test run** and **Stop run**, a **Train driver** (Start, Stop, a speed slider in steps of 10 up to `MaxSpeed`, and the lights); **Santa's speaker** (a Chromecast one's link and how long it has held, its volume and Santa's, **Connect** and **Disconnect**, and **Test Santa's voice**); each child's **Extra wish today**; the shopping list; and every letter with its mood and Santa's reply. A worried or sad letter shows as an alert at the top.
+- The dashboard (`http://np.local/elves`) has the train's status (how long the hub has been connected, its battery in percent and volts, and how fresh the news is, updated every few seconds), **Connect** and **Disconnect** for the train's hub, **Test run** and **Stop run**, a **Train driver** (Start, Stop, a speed slider in steps of 10 up to `MaxSpeed`, and the lights); **Santa's speaker** (a Chromecast one's link and how long it has held, its volume and Santa's, **Connect** and **Disconnect**, a slider for **Santa's loudness**, and **Test Santa's voice**); each child's **Extra wish today**; the shopping list; and every letter with its mood and Santa's reply. A worried or sad letter shows as an alert at the top.
 - **Lost card?** On **QR cards & LEGO plans**, click **Lost this card? Make a new code** under it. The old card and its LEGO mosaic stop working at once, and the new card is ready to print.
 - **After a power cut** everything starts by itself, and today's unfinished letters carry on. If the dashboard shows the train Offline, press its green button, and make sure it's back at the mailbox before the next letter. For a planned shutdown, use `sudo poweroff` rather than pulling the plug.
 
