@@ -33,6 +33,13 @@ public sealed class MailRunService : BackgroundService
     Guid? _currentWish;
     int _speed;
 
+    // Batteries sag hard under the motor's load (cells that rest at 88% read 0% two seconds into speed 30), so the
+    // battery is read only once the train has stood still a few seconds, and that resting reading is what decides
+    // whether a letter goes by train and what the dashboard shows.
+    static readonly TimeSpan BatterySettles = TimeSpan.FromSeconds(5);
+    long _stillSince = Environment.TickCount64; // when the motor last stopped or changed
+    double? _restingVolts;
+
     public MailRunService(IOptions<SignalBoxOptions> options, ITrain train, ITrackside track, MqttLink mqtt,
         StationBoard board, ILogger<MailRunService> log)
     {
@@ -312,7 +319,7 @@ public sealed class MailRunService : BackgroundService
         await SetSpeedAsync(_o.Train.ApproachSpeed, ct);
         await Task.Delay(350, ct);
         await _train.BrakeAsync(ct);
-        _speed = 0;
+        SetSpeedField(0);
     }
 
     /// <summary>The only way the motor gets power. Caps the speed whatever was asked.</summary>
@@ -323,20 +330,37 @@ public sealed class MailRunService : BackgroundService
         var speed = Math.Clamp(requested, -max, max);
         if (speed != requested) _log.LogWarning("Speed {Requested} capped to {Speed}", requested, speed);
         await _train.SetPowerAsync(speed, ct);
+        SetSpeedField(speed);
+    }
+
+    /// <summary>Every change of speed goes through here, so the battery knows how long the train has stood still.</summary>
+    void SetSpeedField(int speed)
+    {
+        if (speed != 0 || _speed != 0) Volatile.Write(ref _stillSince, Environment.TickCount64);
         _speed = speed;
+    }
+
+    /// <summary>Standing still long enough for the batteries to recover from the motor's load.</summary>
+    bool Resting => _speed == 0 && Environment.TickCount64 - Volatile.Read(ref _stillSince) >= BatterySettles.TotalMilliseconds;
+
+    /// <summary>The voltage now if the train is resting, otherwise the last resting one (the hub reports it live).</summary>
+    double? RestingVolts()
+    {
+        if (Resting) _restingVolts = _train.BatteryVolts ?? _restingVolts;
+        return _restingVolts ?? _train.BatteryVolts;
     }
 
     async Task SafeBrakeAsync()
     {
         if (!_train.IsConnected)
         {
-            _speed = 0; // no hub to send the brake to (after Disconnect, Stop is a no-op)
+            SetSpeedField(0); // no hub to send the brake to (after Disconnect, Stop is a no-op)
             return;
         }
         try
         {
             await _train.BrakeAsync(CancellationToken.None);
-            _speed = 0;
+            SetSpeedField(0);
         }
         catch (Exception ex)
         {
@@ -413,7 +437,7 @@ public sealed class MailRunService : BackgroundService
         {
             try
             {
-                if (_train.IsConnected && _currentWish is null) await _train.RefreshBatteryAsync(ct);
+                if (_train.IsConnected && _currentWish is null && Resting) await _train.RefreshBatteryAsync(ct);
                 await PublishStateAsync();
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -427,7 +451,7 @@ public sealed class MailRunService : BackgroundService
 
     Task PublishStateAsync() => _mqtt.PublishAsync(Topics.TrainState, new TrainState(
         _train.IsConnected, _train.BatteryPercent, _speed, _currentWish is not null, _train.Mode, _track.Mode, DateTimeOffset.Now,
-        Math.Clamp(_o.Train.MaxSpeed, 0, 100), _train.BatteryVolts, _train.ConnectedSince, _o.Train.LowBatteryPercent,
+        Math.Clamp(_o.Train.MaxSpeed, 0, 100), RestingVolts(), _train.ConnectedSince, _o.Train.LowBatteryPercent,
         _listening), retain: true);
 
     async Task PublishStateQuietlyAsync()
