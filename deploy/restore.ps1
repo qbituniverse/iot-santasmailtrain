@@ -2,13 +2,17 @@
   After a fresh card or on a new Pi: copies a snapshot from backup.ps1 back to the Pi, and prints the one line to run
   there. Publish and run setup.sh first, so HQ and the signal box are installed for the snapshot to go back into.
 
-    .\deploy\restore.ps1 -PiHost pi@np.local                         # the newest snapshot in Documents\NorthPole backups
+    .\deploy\restore.ps1 -PiHost pi@np.local                         # the newest snapshot in the backup folder
     .\deploy\restore.ps1 -PiHost pi@np.local -Snapshot D:\northpole-np-20261215-210000.tar.gz
+
+  The backup folder is -From, or else the NORTHPOLE_BACKUPS environment variable, or else Documents\NorthPole backups,
+  as for backup.ps1.
 #>
 param(
     [string]$PiHost = "$env:USERNAME@np.local",
     [string]$Snapshot,
-    [string]$From = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'NorthPole backups')
+    [string]$From = $(if ($env:NORTHPOLE_BACKUPS) { $env:NORTHPOLE_BACKUPS }
+                      else { Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'NorthPole backups' })
 )
 $ErrorActionPreference = 'Stop'
 
