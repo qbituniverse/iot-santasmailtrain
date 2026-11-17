@@ -3,15 +3,20 @@
   drawings, Santa's voice files, and the settings that hold the family and the speaker (deploy/pi/backup.sh makes it).
   The Pi keeps its own nightly snapshots too, but those go with its card; these don't.
 
-    .\deploy\backup.ps1 -PiHost pi@np.local              # a snapshot now, into Documents\NorthPole backups
+    .\deploy\backup.ps1 -PiHost pi@np.local              # a snapshot now, into the backup folder
     .\deploy\backup.ps1 -PiHost pi@np.local -Schedule    # adds a daily Windows task that runs this script
 
-  Run it by hand before reflashing the Pi. The newest -Keep snapshots stay; a cloud-synced folder for -To gives a copy
-  away from the house as well. Snapshots hold the family's letters but never the Claude key or the PIN.
+  The backup folder is -To, or else the NORTHPOLE_BACKUPS environment variable, or else Documents\NorthPole backups.
+  Set the variable once, and this, the daily task and restore.ps1 all use your folder:
+    [Environment]::SetEnvironmentVariable('NORTHPOLE_BACKUPS', 'D:\Backups\NorthPole', 'User')
+
+  Run it by hand before reflashing the Pi. The newest -Keep snapshots stay; a cloud-synced folder gives a copy away from
+  the house as well. Snapshots hold the family's letters but never the Claude key or the PIN.
 #>
 param(
     [string]$PiHost = "$env:USERNAME@np.local",
-    [string]$To = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'NorthPole backups'),
+    [string]$To = $(if ($env:NORTHPOLE_BACKUPS) { $env:NORTHPOLE_BACKUPS }
+                    else { Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'NorthPole backups' }),
     [int]$Keep = 60,
     [switch]$Schedule
 )
