@@ -87,7 +87,7 @@ The **QR cards & LEGO plans** page draws a build plan for each child: the tile l
 | LEGO City train with a Powered Up hub (88009) | Built and set up for 60337 Express Passenger Train: motor on port A, lights on port B. Other Powered Up trains should work; set the ports in the configuration. The train only runs forwards, so put the mailbox and the North Pole on opposite sides of a loop. |
 | Raspberry Pi 5, 4 GB or more | Runs everything. Put it beside the track by the mailbox, since the sensors, servo, LEDs and station board are wired to it. Use the official 27 W supply. Its built-in Bluetooth drives the hub. |
 | microSD card, 32 GB or more | 64-bit Raspberry Pi OS (Bookworm or later), Lite recommended. |
-| Speaker at the North Pole | The Pi 5 has no headphone jack: a Chromecast speaker or soundbar on the same Wi-Fi (see [Santa's voice on a Chromecast speaker](#santas-voice-on-a-chromecast-speaker)), a USB speaker on a long enough cable, or an Amazon Echo over Bluetooth (see [Santa's voice on an Amazon Echo](#santas-voice-on-an-amazon-echo)). |
+| Speakers at the North Pole | The Pi 5 has no headphone jack: small speakers on a USB sound card, in one of the Pi's black USB 2.0 ports (see [Santa's speakers](#santas-speakers)), or an Amazon Echo over Bluetooth (see [Santa's voice on an Amazon Echo](#santas-voice-on-an-amazon-echo)). |
 | Standard USB Bluetooth adapter | Optional: only if the Echo and the train share the radio badly (see [Bluetooth on one Pi](#bluetooth-on-one-pi)). |
 | Magnetic door contact (reed switch) and magnet | The North Pole sensor; the magnet rides on the locomotive. |
 | HC-SR04 ultrasonic sensor, plus 1 kΩ and 2 kΩ resistors | The mailbox sensor. The resistors protect the Pi from its 5 V Echo pin. IR obstacle modules (FC-51, TCRT5000) also work. |
@@ -254,9 +254,9 @@ One `KEY=value` per line, with no spaces around `=` and no `export`; `#` starts 
 | `Voice:Mode` | `Piper` | `None` for text only. | Plain |
 | `Voice:PiperUrl`, `Voice:PiperVoice` | `http://localhost:5000`, empty | Where Piper listens; must match `piper.service`. | Plain |
 | `Voice:LengthScale` | `1.15` | Above 1 speaks more slowly. | Plain |
-| `Voice:PlayOnStation`, `Voice:PlayCommand` | `true`, `aplay -q` | Whether and how Santa plays at the station. | Plain |
-| `Voice:CastTo` | empty | A Chromecast speaker to play Santa on instead, by its name in the Google Home app or its IP address. Empty plays on the Pi with `PlayCommand`, which is also the fallback. | Plain |
-| `Voice:CastVolumeAbove`, `CastVolumeMin`, `CastVolumeMax` | `0.15`, `0.35`, `0.7` | Santa plays this far above the speaker's current volume (the TV's), within these limits; the volume goes back after. The dashboard's loudness slider changes how far above (0 to 0.3) and keeps it in `data/santa-loudness.json`. | Plain |
+| `Voice:PlayOnStation`, `Voice:PlayCommand` | `true`, `aplay -q` | Whether and how Santa plays at the station. With `aplay` and a `SoundCard`, HQ adds the card itself. | Plain |
+| `Voice:SoundCard` | empty | The USB sound card Santa's speakers hang on, by its ALSA id: the name in brackets in `/proc/asound/cards`, such as `Audio`. HQ plays Santa on it, watches that it's plugged in, and sets its volume from the dashboard. Empty plays on the Pi's default output, which is HDMI on a Pi 5. | Plain |
+| `Voice:VolumeControl` | `PCM` | The card's volume control, as `amixer -c CARD scontrols` lists it. The dashboard's volume slider sets it, and HQ keeps the level in `data/speaker.json`. | Plain |
 | `Voice:ArrivalSound` | `sounds/arrival.wav` | A jingle before Santa speaks, inside `data/`. | Plain |
 | `Qr:BaseUrl` | `http://np.local` | The address in every QR code. Change it before printing, only if phones can't reach `np.local`. | Plain |
 | `Qr:BaseplateStuds` | `32` | The baseplate size for the LEGO plan. | Plain |
@@ -320,7 +320,7 @@ The Pi's default hostname is `np`, which keeps the QR address short. Replace `yo
    sudo reboot
    ```
    Optionally drop a jingle at `/opt/northpole/hq/data/sounds/arrival.wav`.
-6. **Connect the speaker.** Name a Chromecast speaker in `hq.env` (below), or plug in a USB speaker and test it with `speaker-test -t wav -c 2 -l 1`, or set up an Echo (below). The dashboard's **Test Santa's voice** then has Santa say a line on it.
+6. **Connect the speakers.** Plug their USB sound card into a black USB port and set `Voice:SoundCard` to its id (see [Santa's speakers](#santas-speakers)), or set up an Echo (below). The dashboard's **Test Santa's voice** then has Santa say a line on them.
 7. **Wake the train.** Put it at the mailbox and press the green button on the hub. The signal box keeps scanning until it finds it, and the dashboard then shows it Online.
 8. **Print the cards.** Open `http://np.local/elves`, enter your PIN, and open **QR cards & LEGO plans**.
 
@@ -337,18 +337,18 @@ sudo rsync -a --exclude 'appsettings*.json' ~/northpole-signalbox/ /opt/northpol
 
 Running `setup.sh` again also keeps your settings files, and neither touches `hq.env` or `data/`. A setting that's new in an update uses its default until you add it.
 
-### Santa's voice on a Chromecast speaker
+### Santa's speakers
 
-A soundbar or speaker with Chromecast built in can be the station speaker over the home Wi-Fi, with no Bluetooth and nothing sent to the internet: HQ shares Santa's reply on the network and the speaker fetches it from the Pi. Put its name, as the Google Home app shows it, in `/etc/northpole/hq.env` and restart HQ:
+Small speakers on a USB sound card are the station speakers. Plug the card into one of the Pi's black USB 2.0 ports (a sound card gains nothing from the blue USB 3.0 ones), and the speakers' USB power into the other. Find the card's id, the name in brackets, and try it:
 
 ```bash
-echo 'NorthPole__Voice__CastTo=Living Room Soundbar' | sudo tee -a /etc/northpole/hq.env
-sudo systemctl restart northpole-hq
+cat /proc/asound/cards      # for example:  2 [Audio          ]: USB-Audio - USB Audio
+speaker-test -D plughw:CARD=Audio,DEV=0 -t wav -c 2 -l 1
 ```
 
-Santa cuts in on whatever the speaker is playing, 15 points above its volume (between 35% and 70%), and the TV comes back by itself after. A TV with Chromecast is a Chromecast too, which is why the speaker goes by name. If the speaker doesn't answer, Santa plays on the Pi with `PlayCommand` instead.
+Then set `"SoundCard": "Audio"` under `Voice` in `/opt/northpole/hq/appsettings.json`, with your card's id, and restart HQ (`sudo systemctl restart northpole-hq`).
 
-HQ keeps a link to the speaker from start-up, so the dashboard's **Santa's speaker** panel shows whether it answers and since when, its volume, and the volume Santa will play at, with a slider for how far above the TV he plays. **Disconnect** closes the link and keeps Santa on the Pi until **Connect**.
+The dashboard's **Santa's speakers** panel shows whether the card is plugged in and for how long, its name, what Santa is saying while he speaks, when he last spoke, and why the last try failed, if it did. Its volume slider sets the card's volume, which HQ keeps in `data/speaker.json` and sets again whenever the card is plugged back in. HQ can't see the speakers' own power or knob: if a test plays but nothing is heard, check those. A hiss or whine usually goes away with the speakers powered from a separate USB charger.
 
 ### Santa's voice on an Amazon Echo
 
@@ -389,8 +389,8 @@ Set `Santa:Language` (for example, "Polish"), download a matching [Piper voice](
 **For grown-ups**
 
 - Each morning, park the train at the mailbox and press its green button. Swap the six AAA batteries when the dashboard shows them low.
-- **Standby.** A connected hub draws about 70 mA just waiting, which empties six AAA cells in about half a day, so after 5 minutes with nothing happening the signal box lets it go and it switches itself off. Letters then go with Rudolph until someone presses **Connect** (and the hub's green button if its light is off). Santa's speaker link sleeps the same way, but Santa still plays on the speaker, which wakes it. A slider for each on the dashboard sets the minutes, up to 30, or 0 for never; HQ keeps them in `data/standby.json`.
-- The dashboard (`http://np.local/elves`) has the train's status (how long the hub has been connected, its battery in percent and volts, and how fresh the news is, updated every few seconds), **Connect** and **Disconnect** for the train's hub, **Test run** and **Stop run**, a **Train driver** (Forward, Reverse and Stop, a speed slider in steps of 10 up to `MaxSpeed`, and the lights); **Santa's speaker** (a Chromecast one's link and how long it has held, its volume and Santa's, **Connect** and **Disconnect**, a slider for **Santa's loudness**, and **Test Santa's voice**, with a box for your own words); each child's **Extra wish today**; the shopping list; and every letter with its mood and Santa's reply. A worried or sad letter shows as an alert at the top.
+- **Standby.** A connected hub draws about 70 mA just waiting, which empties six AAA cells in about half a day, so after 5 minutes with nothing happening the signal box lets it go and it switches itself off. Letters then go with Rudolph until someone presses **Connect** (and the hub's green button if its light is off). A slider on the dashboard sets the minutes, up to 30, or 0 for never; HQ keeps it in `data/standby.json`.
+- The dashboard (`http://np.local/elves`) has the train's status (how long the hub has been connected, its battery in percent and volts, and how fresh the news is, updated every few seconds), **Connect** and **Disconnect** for the train's hub, **Test run** and **Stop run**, a **Train driver** (Forward, Reverse and Stop, a speed slider in steps of 10 up to `MaxSpeed`, and the lights); **Santa's speakers** (whether their sound card is plugged in and for how long, what Santa is saying, when he last spoke, a **volume** slider, and **Test Santa's voice**, with a box for your own words); each child's **Extra wish today**; the shopping list; and every letter with its mood and Santa's reply. A worried or sad letter shows as an alert at the top.
 - **The Train Driver card** on **QR cards & LEGO plans** opens `http://np.local/driver`: the train's status, **Connect** and **Disconnect**, and the driver's Forward, Reverse, Stop, speed and lights, with no PIN and no Test run. Anyone on the home Wi-Fi with the card can drive; the signal box keeps its speed cap, won't drive during a mail run, and brakes if HQ goes quiet. **Stop** works there too, and ends a mail run as it does on the dashboard.
 - **Lost card?** On **QR cards & LEGO plans**, click **Lost this card? Make a new code** under it. The old card and its LEGO mosaic stop working at once, and the new card is ready to print.
 - **After a power cut** everything starts by itself, and today's unfinished letters carry on. If the dashboard shows the train Offline, press its green button, and make sure it's back at the mailbox before the next letter. For a planned shutdown, use `sudo poweroff` rather than pulling the plug.
@@ -428,7 +428,7 @@ HQ, and the AI behind it, can only *ask* the signal box to do things. The signal
 - **Disconnect** brakes, ends any run, lets the hub go and stops looking for it, so letters go with Rudolph until **Connect**. From start-up, and after Connect, the signal box looks for the hub until it finds it: press the hub's green button if its light isn't flashing.
 - The train driver works only between mail runs, and a letter sent while an elf is driving goes with Rudolph. A change of direction stops the train first, then pulls away the other way.
 
-The MQTT broker has **no authentication**. Anyone on the same network could ask for a test run, though these limits still apply, so run it on a trusted home network, never a guest or public one. The dashboard is behind a PIN, rate-limited to five tries in five minutes. While Santa plays on a Chromecast speaker, HQ shares that one sound file at a random address (`/cast/…`) for the speaker to fetch, and only until it finishes.
+The MQTT broker has **no authentication**. Anyone on the same network could ask for a test run, though these limits still apply, so run it on a trusted home network, never a guest or public one. The dashboard is behind a PIN, rate-limited to five tries in five minutes.
 
 ## Troubleshooting
 
@@ -437,7 +437,7 @@ The MQTT broker has **no authentication**. Anyone on the same network could ask 
 | A card opens nothing | The phone can't resolve `np.local` (some Android phones), or it's on another network. | Join the same Wi-Fi. If `http://np.local` fails in the phone's browser, set `Qr:BaseUrl` to the Pi's IP address and reprint. |
 | Santa sounds like a template | No API key, a wrong one, or no internet. The log says it's using the offline Santa. | Put the key in `hq.env` and restart HQ. |
 | No voice, but the reply shows | Piper isn't running. | `systemctl status piper`; the first setup needs internet to download the voice. |
-| No sound at the station | Audio goes to HDMI, the Echo dropped, or the Chromecast speaker wasn't found. | Point `Voice:PlayCommand` at the USB card (`aplay -q -D plughw:CARD=…`), or check the Echo is on and in range. For a Chromecast speaker, HQ's log lists the speakers it found: `Voice:CastTo` must match one of those names. |
+| No sound at the station | The speakers' sound card isn't plugged in or isn't named, the speakers are off, or the Echo dropped. | The dashboard's **Santa's speakers** panel says whether HQ sees the card and why the last try failed. `Voice:SoundCard` must match the name in brackets in `/proc/asound/cards`. Check the speakers' power and knob, or that the Echo is on and in range. |
 | "Bluetooth adapter hci0 not found" | The Pi's Bluetooth is off. | `sudo rfkill unblock bluetooth`; remove any `dtoverlay=disable-bt` from `/boot/firmware/config.txt`; reboot. |
 | "Looking for the LEGO hub…" over and over | The hub is off, out of range, or connected to the LEGO remote. | Switch the remote off, and press the hub's button within a few metres of the Pi. |
 | The train runs past the North Pole and times out | The magnet misses the contact, or it switches the other way. | Bring the magnet within 1.5 cm; check with `pinctrl get 17` with and without it, and flip `ActiveLow` if needed. |

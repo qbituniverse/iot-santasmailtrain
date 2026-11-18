@@ -61,19 +61,11 @@
         </section>
       </section>
       <section class="panel">
-        <h2>Santa's speaker</h2>
+        <h2>Santa's speakers</h2>
         <div id="speakerStatus" class="muted">Checking…</div>
-        <div class="actions">
-          <button class="btn secondary" id="speakerConnect" disabled>Connect</button>
-          <button class="btn secondary" id="speakerDisconnect" disabled>Disconnect</button>
-        </div>
-        <label class="speed" for="speakerStandby">
-          <span>Standby: the link sleeps after <output id="speakerStandbyOut" for="speakerStandby">5 min</output> idle</span>
-          <input type="range" id="speakerStandby" min="0" max="30" step="1" value="5">
-        </label>
-        <label class="speed" for="loudness">
-          <span>Santa's loudness: the volume + <output id="loudnessOut" for="loudness">15</output></span>
-          <input type="range" id="loudness" min="0" max="30" step="5" value="15" disabled>
+        <label class="speed" for="speakerVolume">
+          <span>Volume: <output id="speakerVolumeOut" for="speakerVolume">–</output></span>
+          <input type="range" id="speakerVolume" min="0" max="100" step="5" value="50" disabled>
         </label>
         <textarea class="voice-text" id="voiceText" rows="2" maxlength="300"
           placeholder="Ho ho ho! This is Santa, checking the speaker at the North Pole. Can you hear me?"
@@ -150,7 +142,7 @@
       `<button class="btn secondary" data-extra="${esc(c.id)}">Extra wish today for ${esc(c.name)}</button>`).join('');
   }
 
-  // The mail train panel (shared with the train driver's page) and the speaker's connection timer.
+  // The mail train panel (shared with the train driver's page) and the timer for how long the speakers are plugged in.
   const panel = NorthPole.trainPanel({
     root: $('trainPanel'),
     api,
@@ -159,7 +151,7 @@
   });
   const speakerClock = NorthPole.clock();
 
-  // The standby sliders: minutes with nothing happening before the train, or the speaker's link, sleeps. 0 never.
+  // The standby slider: minutes with nothing happening before the train sleeps. 0 never.
   const minutesText = m => +m === 0 ? 'never' : `${m} min`;
   function standbySlider(id, path) {
     const slider = $(id), out = $(id + 'Out');
@@ -175,75 +167,45 @@
     };
   }
   const showTrainStandby = standbySlider('trainStandby', '/train/standby');
-  const showSpeakerStandby = standbySlider('speakerStandby', '/speaker/standby');
 
-  // Santa's speaker: a Chromecast one HQ keeps a link to, or the Pi's own output when none is named.
-  // Santa plays this far above the speaker's volume, within its limits (as SantaLoudness.LevelFor on HQ).
-  let speakerInfo = null;
-  const santaLevel = (sp, above) => sp.state.volume >= sp.max ? sp.state.volume
-    : Math.min(sp.max, Math.max(sp.min, sp.state.volume + above));
-  const pct = v => Math.round(v * 100) + '%';
-  // Says where Santa lands, and whether the ceiling holds him back, so a slider move that changes nothing makes sense.
-  const santaLine = (sp, above) => {
-    const level = santaLevel(sp, above), held = sp.state.volume < sp.max && sp.state.volume + above > sp.max;
-    return `Santa plays at <b>${pct(level)}</b>: the volume + ${Math.round(above * 100)}` +
-      (held ? `, held at the ${pct(sp.max)} ceiling.` : `, between ${pct(sp.min)} and ${pct(sp.max)}.`);
+  // Santa's speakers: their USB sound card, whether it's plugged in and since when, its volume, and what Santa is saying.
+  const sinceText = ms => {
+    const m = Math.floor(ms / 60000);
+    return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ${m % 60} min ago`;
   };
-
   function renderSpeaker(sp) {
     const s = sp.state, now = Date.parse(sp.now);
-    speakerInfo = sp;
-    showSpeakerStandby(sp.idleMinutes);
     speakerClock.set(null);
-    $('speakerConnect').disabled = !s.configured || s.connected;
-    $('speakerDisconnect').disabled = !s.connected;
-    const loud = $('loudness');
-    loud.disabled = !s.configured;
-    loud.max = Math.round(sp.mostAbove * 100);
-    if (document.activeElement !== loud) loud.value = Math.round(sp.above * 100);
-    $('loudnessOut').textContent = loud.value;
-    if (!s.configured) {
+    const vol = $('speakerVolume');
+    vol.disabled = s.volume == null;
+    if (document.activeElement !== vol && s.volume != null) vol.value = s.volume;
+    $('speakerVolumeOut').textContent = s.volume == null && document.activeElement !== vol ? '–' : vol.value + '%';
+    if (s.card == null) {
       $('speakerStatus').innerHTML = '<span class="pill">The Pi\'s own output</span>' +
-        '<div class="muted" style="margin-top:6px">No Chromecast speaker is named (Voice:CastTo), so Santa plays on the Pi.</div>';
+        '<div class="muted" style="margin-top:6px">No sound card is named (Voice:SoundCard), so Santa plays on the ' +
+        'Pi\'s default output and this panel can\'t see it.</div>';
       return;
     }
-    const pills = [s.connected ? '<span class="pill ok">Connected <span id="spUptime"></span></span>'
-      : !s.wanted ? '<span class="pill bad">Disconnected</span>'
-      : s.asleep ? '<span class="pill">Asleep</span>'
-      : '<span class="pill">Looking for it</span>'];
-    if (s.connected && s.volume != null) pills.push(`<span class="pill">Volume ${pct(s.volume)}</span>`);
-    if (s.connected && s.muted) pills.push('<span class="pill bad">Muted</span>');
-    if (s.connected && s.playing) pills.push(`<span class="pill">Playing ${esc(s.playing)}</span>`);
-    const lines = [esc(s.name) + (s.address && s.address !== s.name ? ' · ' + esc(s.address) : '')];
-    if (s.connected && sp.santaVolume != null)
-      lines.push(`<span id="santaLine">${santaLine(sp, sp.above)}</span>`);
-    const sleepsIn = s.connected && s.sleepAt ? Math.max(1, Math.ceil((Date.parse(s.sleepAt) - now) / 60000)) : null;
-    if (sleepsIn) lines.push(`The link sleeps in about ${sleepsIn} min if nothing happens; Santa still plays on it.`);
-    if (!s.connected) lines.push(!s.wanted
-      ? 'Santa plays on the Pi\'s own output until Connect.'
-      : s.asleep ? `The link went to sleep after ${sp.idleMinutes} min with nothing happening. Santa still plays on the ` +
-        'speaker, and that wakes it; Connect wakes it now.'
-      : 'HQ keeps looking. If it doesn\'t answer when Santa speaks, he plays on the Pi instead.');
-    if (s.connected && s.at) lines.push('<span>updated <span id="spHeard"></span> ago</span>');
+    const pills = [s.present ? '<span class="pill ok">Plugged in <span id="spUptime"></span></span>'
+      : '<span class="pill bad">Not plugged in</span>'];
+    if (s.muted) pills.push('<span class="pill bad">Muted</span>');
+    if (s.speaking) pills.push(`<span class="pill">Speaking: ${esc(s.speaking)}</span>`);
+    const lines = [s.present ? `${esc(s.name || s.card)} · sound card ${esc(s.card)}`
+      : `No sound card "${esc(s.card)}". Plug the speakers' USB sound card into a black USB port on the Pi; until ` +
+        'then Santa can\'t be heard at the station, though the children still hear him on their phones.'];
+    if (s.lastSpoke) lines.push(`Santa last spoke ${sinceText(now - Date.parse(s.lastSpoke))}.`);
+    if (s.problem) lines.push(`<span class="problem">Last try: ${esc(s.problem)}</span>`);
     $('speakerStatus').innerHTML = pills.join(' ') + lines.map(l => `<div class="muted" style="margin-top:6px">${l}</div>`).join('');
-    if (s.connected) speakerClock.set({
-      uptimeId: 'spUptime',
-      heardId: 'spHeard',
-      connected: s.connectedSince ? now - Date.parse(s.connectedSince) : null,
-      heard: s.at ? now - Date.parse(s.at) : 0,
-    });
+    if (s.present && s.pluggedInSince) speakerClock.set({ uptimeId: 'spUptime', connected: now - Date.parse(s.pluggedInSince) });
   }
 
-  // The loudness slider: shows Santa's level as it moves, and saves it on HQ when let go.
-  $('loudness').addEventListener('input', e => {
-    const above = +e.target.value;
-    $('loudnessOut').textContent = above;
-    if ($('santaLine') && speakerInfo?.state.volume != null) $('santaLine').innerHTML = santaLine(speakerInfo, above / 100);
-  });
-  $('loudness').addEventListener('change', async e => {
+  // The volume slider: shows the level as it moves, and sets it on the speakers when let go.
+  $('speakerVolume').addEventListener('input', e => { $('speakerVolumeOut').textContent = e.target.value + '%'; });
+  $('speakerVolume').addEventListener('change', async e => {
     try {
-      await api('/speaker/loudness?above=' + (+e.target.value / 100), { method: 'POST' });
-      $('voiceNote').textContent = "Saved. Press Test Santa's voice to hear it.";
+      const res = await api('/speaker/volume?percent=' + e.target.value, { method: 'POST' });
+      $('voiceNote').textContent = res.ok ? "Set. Press Test Santa's voice to hear it."
+        : (await res.json().catch(() => ({}))).detail || "Couldn't set the volume.";
       refreshLive();
     } catch (err) { if (err.message !== 'login') console.error(err); }
   });
@@ -285,20 +247,16 @@
     if (!b) return;
     try {
       if (b.dataset.replay) await api(`/wishes/${b.dataset.replay}/replay`, { method: 'POST' });
-      if (b.id === 'speakerConnect' || b.id === 'speakerDisconnect') {
-        b.disabled = true;
-        await api(b.id === 'speakerConnect' ? '/speaker/connect' : '/speaker/disconnect', { method: 'POST' });
-        setTimeout(refreshLive, 1500);
-      }
       if (b.id === 'voiceTest') {
         b.disabled = true;
         $('voiceNote').textContent = 'Santa is speaking…';
+        setTimeout(refreshLive, 1200); // shows him speaking
         try {
           const res = await api('/voice/test', { method: 'POST', body: JSON.stringify({ text: $('voiceText').value }) });
           $('voiceNote').textContent = res.ok
-            ? `Santa spoke on ${(await res.json()).speaker}.`
-            : 'Santa couldn\'t speak: is Piper running?';
-        } finally { b.disabled = false; }
+            ? `Santa spoke on ${(await res.json()).speaker}. Nothing heard? Check the speakers' power and their own knob.`
+            : `Santa couldn't speak: ${(await res.json().catch(() => ({}))).detail || 'is Piper running?'}`;
+        } finally { b.disabled = false; refreshLive(); }
       }
       if (b.dataset.extra) { await api(`/children/${b.dataset.extra}/extra-wish`, { method: 'POST' }); b.textContent = 'Granted!'; }
     } catch (err) { if (err.message !== 'login') console.error(err); }

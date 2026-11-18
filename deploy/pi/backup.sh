@@ -1,8 +1,8 @@
 #!/bin/bash
 # Snapshots everything that lives only on this Pi, so a fresh card (or a new Pi) gets it all back with restore.sh:
 #   - HQ's data/: the QR card codes (printed and LEGO cards keep working), every letter with its gift ideas and what's
-#     been bought, the drawings, Santa's voice files, and what the dashboard saved (Santa's loudness);
-#   - HQ's appsettings.json: the family, Santa's family lore, the speaker;
+#     been bought, the drawings, Santa's voice files, and what the dashboard saved (Santa's volume, the train's standby);
+#   - HQ's appsettings.json: the family, Santa's family lore, his speakers' sound card;
 #   - the signal box's appsettings files: speeds, sensors and timings, if you've tuned them.
 # Not /etc/northpole/hq.env: the Claude key and the PIN are secrets, so keep them somewhere safe of your own.
 #

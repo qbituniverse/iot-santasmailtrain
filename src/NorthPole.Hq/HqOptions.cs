@@ -64,30 +64,24 @@ public sealed class VoiceOptions
     /// <summary>&gt; 1 speaks slower. Santa is never in a hurry.</summary>
     public double LengthScale { get; set; } = 1.15;
 
-    /// <summary>Play Santa out loud at the North Pole station (the Pi's speaker).</summary>
+    /// <summary>Play Santa out loud at the North Pole station, on his speakers.</summary>
     public bool PlayOnStation { get; set; } = true;
 
-    /// <summary>Command used to play a WAV file; the file path is appended.</summary>
+    /// <summary>
+    /// The sound card Santa's speakers hang on, by its ALSA id: the name in brackets in /proc/asound/cards (a USB sound
+    /// card is often "Audio" or "Device"). HQ plays Santa on it, watches that it's plugged in, and sets its volume from
+    /// the dashboard. Empty plays on the Pi's default output, which on a Pi 5 is HDMI, with nothing to watch.
+    /// </summary>
+    public string? SoundCard { get; set; }
+
+    /// <summary>The card's volume control, as <c>amixer -c CARD scontrols</c> lists it.</summary>
+    public string VolumeControl { get; set; } = "PCM";
+
+    /// <summary>
+    /// Command used to play a WAV file; the file path is appended. For aplay with a <see cref="SoundCard"/>, HQ adds
+    /// <c>-D plughw:CARD=…,DEV=0</c> itself.
+    /// </summary>
     public string PlayCommand { get; set; } = "aplay -q";
-
-    /// <summary>
-    /// A Chromecast speaker on the home network to play Santa on instead, such as a soundbar: its name as the Google
-    /// Home app shows it, or its IP address. Empty plays on the Pi with <see cref="PlayCommand"/>, which is also the
-    /// fallback when the speaker doesn't answer.
-    /// </summary>
-    public string? CastTo { get; set; }
-
-    /// <summary>
-    /// Santa plays this much above the speaker's current volume (the TV's), on its 0..1 scale, until the dashboard's
-    /// slider changes it (<see cref="Santa.SantaLoudness"/>).
-    /// </summary>
-    public double CastVolumeAbove { get; set; } = 0.15;
-
-    /// <summary>Santa's volume on the speaker is never below this, so a quiet TV still lets him be heard.</summary>
-    public double CastVolumeMin { get; set; } = 0.35;
-
-    /// <summary>Santa's volume on the speaker is never above this, unless the TV is already louder.</summary>
-    public double CastVolumeMax { get; set; } = 0.7;
 
     /// <summary>Optional sound played when the train arrives (sleigh bells, a whistle). Relative to the data directory.</summary>
     public string? ArrivalSound { get; set; } = "sounds/arrival.wav";
