@@ -103,7 +103,8 @@ echo
 echo "Done. Next:"
 if want hq; then
   echo "  - Edit /opt/northpole/hq/appsettings.json (children, family lore) and sudo nano /etc/northpole/hq.env (key, PIN)."
-  echo "  - Plug in a USB speaker (the Pi 5 has no headphone jack). Test with: speaker-test -t wav -c 2 -l 1"
+  echo "  - Plug Santa's speakers' USB sound card into a black USB port (the Pi 5 has no headphone jack), and set"
+  echo "    Voice:SoundCard to its id, the name in brackets in: cat /proc/asound/cards"
   echo "    Or use an Amazon Echo over Bluetooth: bash echo-speaker.sh"
 fi
 if want signalbox; then

@@ -6,9 +6,9 @@ using NorthPole.Messaging;
 namespace NorthPole.Hq.Mail;
 
 /// <summary>
-/// How long the train and Santa's speaker wait with nothing happening before they sleep, as set by the dashboard's
-/// sliders and kept in the data directory. The train's time goes to the signal box as a retained message, so it has it
-/// from every start; the speaker's is used here, by <see cref="Santa.SpeakerLink"/>. 0 never sleeps.
+/// How long the train waits with nothing happening before it sleeps, as set by the dashboard's slider and kept in the
+/// data directory. It goes to the signal box as a retained message, so the signal box has it from every start. 0 never
+/// sleeps.
 /// </summary>
 public sealed class StandbySettings(IOptions<HqOptions> options, MqttLink mqtt, ILogger<StandbySettings> log) : BackgroundService
 {
@@ -28,19 +28,12 @@ public sealed class StandbySettings(IOptions<HqOptions> options, MqttLink mqtt, 
     }
 
     public int TrainIdleMinutes => Current.TrainIdleMinutes;
-    public int SpeakerIdleMinutes => Current.SpeakerIdleMinutes;
 
     public Task SetTrainAsync(int minutes)
     {
         Save(Current with { TrainIdleMinutes = Math.Clamp(minutes, 0, MostMinutes) });
         log.LogInformation("Train standby set from the dashboard: {Minutes} min (0 never)", TrainIdleMinutes);
         return PublishTrainAsync();
-    }
-
-    public void SetSpeaker(int minutes)
-    {
-        Save(Current with { SpeakerIdleMinutes = Math.Clamp(minutes, 0, MostMinutes) });
-        log.LogInformation("Speaker standby set from the dashboard: {Minutes} min (0 never)", SpeakerIdleMinutes);
     }
 
     /// <summary>Hands the signal box the train's standby time whenever HQ connects to the broker.</summary>
@@ -63,7 +56,7 @@ public sealed class StandbySettings(IOptions<HqOptions> options, MqttLink mqtt, 
         {
             log.LogWarning("Couldn't read the standby times from {File} ({Message}); using {Minutes} min", _file, ex.Message, DefaultMinutes);
         }
-        return new Saved(DefaultMinutes, DefaultMinutes);
+        return new Saved(DefaultMinutes);
     }
 
     void Save(Saved saved)
@@ -76,5 +69,5 @@ public sealed class StandbySettings(IOptions<HqOptions> options, MqttLink mqtt, 
         }
     }
 
-    sealed record Saved(int TrainIdleMinutes, int SpeakerIdleMinutes);
+    sealed record Saved(int TrainIdleMinutes);
 }

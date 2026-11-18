@@ -47,10 +47,8 @@ else
     builder.Services.AddSingleton<ISantaBrain>(sp => sp.GetRequiredService<OfflineSantaBrain>());
 }
 builder.Services.AddHttpClient<SantaVoice>(http => http.Timeout = TimeSpan.FromSeconds(60));
-builder.Services.AddSingleton<CastSpeaker>();
-builder.Services.AddSingleton<SpeakerLink>();
-builder.Services.AddSingleton<SantaLoudness>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<SpeakerLink>());
+builder.Services.AddSingleton<StationSpeaker>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<StationSpeaker>());
 
 // ---- Wishes, family, QR cards, the mail train ----------------------------------------------------
 builder.Services.AddSingleton<WishStore>();
@@ -181,12 +179,6 @@ app.MapGet("/api/wish/{id:guid}/voice", (Guid id, WishStore store, SantaVoice vo
     return file is not null && File.Exists(file) ? Results.File(file, "audio/wav") : Results.NotFound();
 });
 
-// What the Chromecast speaker fetches while Santa plays on it: shared under a random token for that long only.
-app.MapGet("/cast/{token}", (string token, CastSpeaker cast) =>
-    cast.PathFor(token) is { } file && File.Exists(file)
-        ? Results.File(file, Path.GetExtension(file) == ".mp3" ? "audio/mpeg" : "audio/wav")
-        : Results.NotFound());
-
 // =================================================================================================
 // Elves (parents): PIN-protected dashboard, QR cards, LEGO mosaic plans, train controls
 // =================================================================================================
@@ -227,38 +219,26 @@ elves.MapPost("/wishes/{id:guid}/gifts/{index:int}", (Guid id, int index, Bought
 
 elves.MapPost("/wishes/{id:guid}/replay", (Guid id, WishStore store, SantaVoice voice) =>
 {
-    var file = store.Read(id, w => w.VoiceFile);
-    if (file is null) return Results.NotFound();
-    _ = voice.PlayOnStationAsync(file, CancellationToken.None);
+    var played = store.Read(id, w => w.VoiceFile is null ? null : new { w.VoiceFile, w.ChildName });
+    if (played is null) return Results.NotFound();
+    _ = voice.PlayOnStationAsync(played.VoiceFile, $"{played.ChildName}'s letter", CancellationToken.None);
     return Results.Ok();
 });
 
-// Santa's speaker, when it's a Chromecast one: its link, volume and Santa's level, with the Pi's clock for the timers.
-elves.MapGet("/speaker", (SpeakerLink link, SantaLoudness loudness, StandbySettings standby) =>
-{
-    var state = link.State;
-    return new
-    {
-        state,
-        santaVolume = state.Volume is { } level ? loudness.LevelFor(level) : (double?)null,
-        above = loudness.Above,
-        mostAbove = SantaLoudness.MostAbove,
-        idleMinutes = standby.SpeakerIdleMinutes,
-        min = loudness.Min,
-        max = loudness.Max,
-        now = DateTimeOffset.Now,
-    };
-});
-elves.MapPost("/speaker/connect", (SpeakerLink link) => { link.Connect(); return Results.Ok(); });
-elves.MapPost("/speaker/disconnect", (SpeakerLink link) => { link.Disconnect(); return Results.Ok(); });
+// Santa's speakers: whether their sound card is plugged in and since when, its volume, and what Santa is saying, with
+// the Pi's clock for the timer.
+elves.MapGet("/speaker", (StationSpeaker speaker) => new { state = speaker.State, now = DateTimeOffset.Now });
 
-// The standby sliders: minutes with nothing happening before the train, or the speaker's link, sleeps. 0 never.
-elves.MapPost("/speaker/standby", (int minutes, StandbySettings standby) =>
+// The dashboard's volume slider, 0 to 100: set on the card now, and again whenever it's plugged back in.
+elves.MapPost("/speaker/volume", async (int percent, StationSpeaker speaker, CancellationToken ct) =>
 {
-    if (minutes is < 0 or > StandbySettings.MostMinutes) return Results.BadRequest($"minutes must be 0 to {StandbySettings.MostMinutes}");
-    standby.SetSpeaker(minutes);
-    return Results.Ok();
+    if (percent is < 0 or > 100) return Results.BadRequest("percent must be 0 to 100");
+    return await speaker.SetVolumeAsync(percent, ct)
+        ? Results.Ok()
+        : Results.Problem("Saved, but the speakers' sound card isn't there to set it on: it's set when they're plugged in.", statusCode: 503);
 });
+
+// The standby slider: minutes with nothing happening before the train sleeps. 0 never.
 elves.MapPost("/train/standby", async (int minutes, StandbySettings standby) =>
 {
     if (minutes is < 0 or > StandbySettings.MostMinutes) return Results.BadRequest($"minutes must be 0 to {StandbySettings.MostMinutes}");
@@ -266,20 +246,14 @@ elves.MapPost("/train/standby", async (int minutes, StandbySettings standby) =>
     return Results.Ok();
 });
 
-// The dashboard's loudness slider: Santa plays this far above the speaker's volume, 0 to 0.3.
-elves.MapPost("/speaker/loudness", (double above, SantaLoudness loudness) =>
+// The dashboard's speaker check: Santa says the elf's words, or his usual line, on his speakers; the answer says where,
+// or why he couldn't.
+elves.MapPost("/voice/test", async ([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] VoiceTestRequest? request,
+    SantaVoice voice, CancellationToken ct) =>
 {
-    if (above is < 0 or > SantaLoudness.MostAbove) return Results.BadRequest($"above must be 0 to {SantaLoudness.MostAbove}");
-    loudness.Set(above);
-    return Results.Ok();
+    var test = await voice.TestStationAsync(request?.Text, ct);
+    return test.Where is { } speaker ? Results.Ok(new { speaker }) : Results.Problem(test.Problem, statusCode: 503);
 });
-
-// The dashboard's speaker check: Santa says the elf's words, or his usual line, on the station speaker; the answer says where.
-elves.MapPost("/voice/test", async ([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] VoiceTestRequest? test,
-        SantaVoice voice, CancellationToken ct) =>
-    await voice.TestStationAsync(test?.Text, ct) is { } speaker
-        ? Results.Ok(new { speaker })
-        : Results.Problem("Santa couldn't speak: is Piper running, and is PlayOnStation on?", statusCode: 503));
 
 elves.MapPost("/children/{childId}/extra-wish", (string childId, FamilyService family) =>
 {

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Options;
 
@@ -8,16 +7,15 @@ namespace NorthPole.Hq.Santa;
 /// Gives Santa a voice with Piper (fast, offline neural TTS that runs happily on a Pi 5).
 /// Piper runs as its own little HTTP server so the voice model stays loaded:
 ///   python3 -m piper.http_server -m en_GB-northern_english_male-medium
-/// The WAV is saved next to the wish, played on the station speaker, and offered to the child's phone.
-/// The station speaker is a Chromecast speaker such as a soundbar (<see cref="VoiceOptions.CastTo"/>), or the Pi's own
-/// output through <see cref="VoiceOptions.PlayCommand"/>.
+/// The WAV is saved next to the wish, played on Santa's speakers at the station (<see cref="StationSpeaker"/>), and
+/// offered to the child's phone.
 /// </summary>
-public sealed class SantaVoice(IOptions<HqOptions> options, HttpClient http, CastSpeaker cast, ILogger<SantaVoice> log)
+public sealed class SantaVoice(IOptions<HqOptions> options, HttpClient http, StationSpeaker speaker, ILogger<SantaVoice> log)
 {
     const string TestLine = "Ho ho ho! This is Santa, checking the speaker at the North Pole. Can you hear me?";
 
     // One Santa at a time. Static, because each request gets its own SantaVoice (it's a typed HTTP client).
-    static readonly SemaphoreSlim Speaker = new(1, 1);
+    static readonly SemaphoreSlim OneAtATime = new(1, 1);
 
     readonly HqOptions _o = options.Value;
 
@@ -53,10 +51,11 @@ public sealed class SantaVoice(IOptions<HqOptions> options, HttpClient http, Cas
         voiceFile is null ? null : Path.Combine(VoiceDir, Path.GetFileName(voiceFile));
 
     /// <summary>
-    /// Plays the arrival jingle (if any) and then Santa, on the North Pole station speaker. Returns where it played,
-    /// or null when station playback is off or there was nothing to play.
+    /// Plays the arrival jingle (if any) and then Santa, on Santa's speakers at the station; <paramref name="what"/> is
+    /// what the dashboard shows meanwhile. Returns where it played, or null when station playback is off, there was
+    /// nothing to play, or the speakers couldn't (their state says why).
     /// </summary>
-    public async Task<string?> PlayOnStationAsync(string? voiceFile, CancellationToken ct)
+    public async Task<string?> PlayOnStationAsync(string? voiceFile, string what, CancellationToken ct)
     {
         if (!_o.Voice.PlayOnStation) return null;
 
@@ -69,20 +68,14 @@ public sealed class SantaVoice(IOptions<HqOptions> options, HttpClient http, Cas
         if (PathOf(voiceFile) is { } path && File.Exists(path)) files.Add(path);
         if (files.Count == 0) return null;
 
-        await Speaker.WaitAsync(ct);
+        await OneAtATime.WaitAsync(ct);
         try
         {
-            if (cast.Enabled)
-            {
-                if (await cast.PlayAsync(files, ct)) return _o.Voice.CastTo;
-                log.LogWarning("Santa plays on the Pi's own output instead");
-            }
-            foreach (var file in files) await PlayAsync(file, ct);
-            return "the Pi's own output";
+            return await speaker.PlayAsync(files, what, ct);
         }
         finally
         {
-            Speaker.Release();
+            OneAtATime.Release();
         }
     }
 
@@ -90,44 +83,26 @@ public sealed class SantaVoice(IOptions<HqOptions> options, HttpClient http, Cas
     public const int LongestTestLine = 300;
 
     /// <summary>
-    /// The dashboard's speaker check: Santa says <paramref name="text"/>, or his usual test line when it's empty, on the
-    /// station speaker. Each test has a file of its own, gone once it has played.
+    /// The dashboard's speaker check: Santa says <paramref name="text"/>, or his usual test line when it's empty, on his
+    /// speakers. Each test has a file of its own, gone once it has played.
     /// </summary>
-    public async Task<string?> TestStationAsync(string? text, CancellationToken ct)
+    public async Task<VoiceTest> TestStationAsync(string? text, CancellationToken ct)
     {
+        if (!_o.Voice.PlayOnStation) return new(null, "Voice:PlayOnStation is off, so Santa doesn't play at the station");
         var line = string.IsNullOrWhiteSpace(text) ? TestLine : text.Trim();
         if (line.Length > LongestTestLine) line = line[..LongestTestLine];
         var file = await SynthesizeAsync($"speaker-test-{Guid.NewGuid():N}.wav", line, ct);
-        if (file is null) return null;
+        if (file is null) return new(null, "Piper didn't give Santa a voice: is it running?");
         try
         {
-            return await PlayOnStationAsync(file, ct);
+            return await PlayOnStationAsync(file, "a test", ct) is { } where
+                ? new(where, null)
+                : new(null, speaker.State.Problem ?? "Santa couldn't speak");
         }
         finally
         {
             try { File.Delete(PathOf(file)!); }
             catch (IOException) { } // still open somewhere: a leftover test file does no harm
-        }
-    }
-
-    async Task PlayAsync(string file, CancellationToken ct)
-    {
-        var parts = _o.Voice.PlayCommand.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 0) return;
-        var psi = new ProcessStartInfo(parts[0]) { UseShellExecute = false };
-        if (parts.Length > 1)
-            foreach (var arg in parts[1].Split(' ', StringSplitOptions.RemoveEmptyEntries))
-                psi.ArgumentList.Add(arg);
-        psi.ArgumentList.Add(file);
-
-        try
-        {
-            using var process = Process.Start(psi);
-            if (process is not null) await process.WaitForExitAsync(ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            log.LogWarning("Could not play {File} with '{Command}': {Message}", file, _o.Voice.PlayCommand, ex.Message);
         }
     }
 
@@ -138,3 +113,6 @@ public sealed class SantaVoice(IOptions<HqOptions> options, HttpClient http, Cas
         string? Voice,
         [property: System.Text.Json.Serialization.JsonPropertyName("length_scale")] double LengthScale);
 }
+
+/// <summary>How the dashboard's speaker check went: where Santa spoke, or why he couldn't.</summary>
+public sealed record VoiceTest(string? Where, string? Problem);

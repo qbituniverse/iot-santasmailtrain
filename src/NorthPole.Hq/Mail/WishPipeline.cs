@@ -135,7 +135,7 @@ public sealed class WishPipeline(
             w.AddEvent("answered", "Santa wrote back!");
         });
 
-        await voice.PlayOnStationAsync(voiceFile, ct);
+        await voice.PlayOnStationAsync(voiceFile, $"{child.Name}'s letter", ct);
         if (trip.Arrived) await train.SendHomeAsync(id);
     }
 
