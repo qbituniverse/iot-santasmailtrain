@@ -105,7 +105,6 @@ if want hq; then
   echo "  - Edit /opt/northpole/hq/appsettings.json (children, family lore) and sudo nano /etc/northpole/hq.env (key, PIN)."
   echo "  - Plug Santa's speakers' USB sound card into a black USB port (the Pi 5 has no headphone jack), and set"
   echo "    Voice:SoundCard to its id, the name in brackets in: cat /proc/asound/cards"
-  echo "    Or use an Amazon Echo over Bluetooth: bash echo-speaker.sh"
 fi
 if want signalbox; then
   echo "  - Reboot (for the servo's PWM), check Bluetooth (bluetoothctl show: Powered: yes),"
