@@ -45,7 +45,7 @@ One Raspberry Pi 5 beside the track runs two services that talk MQTT to each oth
 | `NorthPole.Messaging` | Pi 5 | A small MQTTnet wrapper: typed publish/subscribe, auto-reconnect, and an optional embedded broker. |
 | `NorthPole.Hq` | Pi 5 | ASP.NET Core: the children's pages, the parents' dashboard, QR cards and LEGO plans, Claude, Piper, JSON storage. |
 | `NorthPole.SignalBox` | Pi 5 | A worker service: drives the train, reads the sensors, moves the servo, shows each run on the station board, and enforces speed limits and timeouts. |
-| `deploy/` | your computer, then the Pi | `publish.sh` (or `publish.ps1` on Windows) builds both apps and copies them over SSH; `pi/setup.sh`, the systemd units and the Echo scripts set up the Pi; `backup.ps1`, `restore.ps1` and `pi/backup.sh` keep the Pi's own data safe. |
+| `deploy/` | your computer, then the Pi | `publish.sh` (or `publish.ps1` on Windows) builds both apps and copies them over SSH; `pi/setup.sh` and the systemd units set up the Pi; `backup.ps1`, `restore.ps1` and `pi/backup.sh` keep the Pi's own data safe. |
 
 ### The journey of one wish
 
@@ -87,8 +87,8 @@ The **QR cards & LEGO plans** page draws a build plan for each child: the tile l
 | LEGO City train with a Powered Up hub (88009) | Built and set up for 60337 Express Passenger Train: motor on port A, lights on port B. Other Powered Up trains should work; set the ports in the configuration. The train only runs forwards, so put the mailbox and the North Pole on opposite sides of a loop. |
 | Raspberry Pi 5, 4 GB or more | Runs everything. Put it beside the track by the mailbox, since the sensors, servo, LEDs and station board are wired to it. Use the official 27 W supply. Its built-in Bluetooth drives the hub. |
 | microSD card, 32 GB or more | 64-bit Raspberry Pi OS (Bookworm or later), Lite recommended. |
-| Speakers at the North Pole | The Pi 5 has no headphone jack: small speakers on a USB sound card, in one of the Pi's black USB 2.0 ports (see [Santa's speakers](#santas-speakers)), or an Amazon Echo over Bluetooth (see [Santa's voice on an Amazon Echo](#santas-voice-on-an-amazon-echo)). |
-| Standard USB Bluetooth adapter | Optional: only if the Echo and the train share the radio badly (see [Bluetooth on one Pi](#bluetooth-on-one-pi)). |
+| Speakers at the North Pole | The Pi 5 has no headphone jack: small speakers on a USB sound card, in one of the Pi's black USB 2.0 ports (see [Santa's speakers](#santas-speakers)). |
+| Standard USB Bluetooth adapter | Optional: only if the built-in radio's link to the train is weak (see [Bluetooth on one Pi](#bluetooth-on-one-pi)). |
 | Magnetic door contact (reed switch) and magnet | The North Pole sensor; the magnet rides on the locomotive. |
 | HC-SR04 ultrasonic sensor, plus 1 kΩ and 2 kΩ resistors | The mailbox sensor. The resistors protect the Pi from its 5 V Echo pin. IR obstacle modules (FC-51, TCRT5000) also work. |
 | SG90 micro servo | Raises the mailbox flag. |
@@ -320,7 +320,7 @@ The Pi's default hostname is `np`, which keeps the QR address short. Replace `yo
    sudo reboot
    ```
    Optionally drop a jingle at `/opt/northpole/hq/data/sounds/arrival.wav`.
-6. **Connect the speakers.** Plug their USB sound card into a black USB port and set `Voice:SoundCard` to its id (see [Santa's speakers](#santas-speakers)), or set up an Echo (below). The dashboard's **Test Santa's voice** then has Santa say a line on them.
+6. **Connect the speakers.** Plug their USB sound card into a black USB port and set `Voice:SoundCard` to its id (see [Santa's speakers](#santas-speakers)). The dashboard's **Test Santa's voice** then has Santa say a line on them.
 7. **Wake the train.** Put it at the mailbox and press the green button on the hub. The signal box keeps scanning until it finds it, and the dashboard then shows it Online.
 8. **Print the cards.** Open `http://np.local/elves`, enter your PIN, and open **QR cards & LEGO plans**.
 
@@ -350,18 +350,9 @@ Then set `"SoundCard": "Audio"` under `Voice` in `/opt/northpole/hq/appsettings.
 
 The dashboard's **Santa's speakers** panel shows whether the card is plugged in and for how long, its name, what Santa is saying while he speaks, when he last spoke, and why the last try failed, if it did. Its volume slider sets the card's volume, which HQ keeps in `data/speaker.json` and sets again whenever the card is plugged back in. HQ can't see the speakers' own power or knob: if a test plays but nothing is heard, check those. A hiss or whine usually goes away with the speakers powered from a separate USB charger.
 
-### Santa's voice on an Amazon Echo
-
-An Echo can be the station speaker over Bluetooth; Santa still speaks in the Piper voice. On the Pi, from `~/northpole-setup`:
-
-1. Say "Alexa, pair Bluetooth", then run `bash echo-speaker.sh`. It installs BlueALSA and sox, and lists the speakers it can see.
-2. Run `bash echo-speaker.sh AA:BB:CC:DD:EE:FF` with your Echo's address. It pairs, trusts and connects it, points `Voice:PlayCommand` at it, and restarts HQ.
-
-Before each reply, `santa-play` reconnects the Echo if it dropped the link, and adds half a second of silence so a waking speaker doesn't swallow the first word. Pair it before the children are watching, since the Echo announces the connection. This route needs Raspberry Pi OS Lite; on the desktop edition PipeWire handles Bluetooth audio, so pair from its menu and set `Voice:PlayCommand` to `pw-play`.
-
 ### Bluetooth on one Pi
 
-The Pi 5's one radio carries the Wi-Fi, the link to the train's hub and, with an Echo, Santa's voice. Bluetooth can serve the hub and the Echo at the same time, and they rarely overlap, since Santa speaks while the train waits at the North Pole. If his voice crackles or the train drops its link while the Echo plays, plug in a standard USB Bluetooth adapter and give it the train: set `Train:BluetoothAdapter` to `hci1`. A USB speaker avoids the question.
+The Pi 5's one radio carries the Wi-Fi and the link to the train's hub; Santa's voice goes over USB, so it never shares the radio. If the train drops its link or the hub is out of range, plug in a standard USB Bluetooth adapter and give it the train: set `Train:BluetoothAdapter` to `hci1`.
 
 ### Splitting across two Pis
 
@@ -437,7 +428,7 @@ The MQTT broker has **no authentication**. Anyone on the same network could ask 
 | A card opens nothing | The phone can't resolve `np.local` (some Android phones), or it's on another network. | Join the same Wi-Fi. If `http://np.local` fails in the phone's browser, set `Qr:BaseUrl` to the Pi's IP address and reprint. |
 | Santa sounds like a template | No API key, a wrong one, or no internet. The log says it's using the offline Santa. | Put the key in `hq.env` and restart HQ. |
 | No voice, but the reply shows | Piper isn't running. | `systemctl status piper`; the first setup needs internet to download the voice. |
-| No sound at the station | The speakers' sound card isn't plugged in or isn't named, the speakers are off, or the Echo dropped. | The dashboard's **Santa's speakers** panel says whether HQ sees the card and why the last try failed. `Voice:SoundCard` must match the name in brackets in `/proc/asound/cards`. Check the speakers' power and knob, or that the Echo is on and in range. |
+| No sound at the station | The speakers' sound card isn't plugged in or isn't named, or the speakers are off. | The dashboard's **Santa's speakers** panel says whether HQ sees the card and why the last try failed. `Voice:SoundCard` must match the name in brackets in `/proc/asound/cards`. Check the speakers' power and knob. |
 | "Bluetooth adapter hci0 not found" | The Pi's Bluetooth is off. | `sudo rfkill unblock bluetooth`; remove any `dtoverlay=disable-bt` from `/boot/firmware/config.txt`; reboot. |
 | "Looking for the LEGO hub…" over and over | The hub is off, out of range, or connected to the LEGO remote. | Switch the remote off, and press the hub's button within a few metres of the Pi. |
 | The train runs past the North Pole and times out | The magnet misses the contact, or it switches the other way. | Bring the magnet within 1.5 cm; check with `pinctrl get 17` with and without it, and flip `ActiveLow` if needed. |
@@ -445,7 +436,7 @@ The MQTT broker has **no authentication**. Anyone on the same network could ask 
 | The train stops short of or past a platform | Speed and sensor position. | Move the sensor, or tune `CruiseSpeed` and `ApproachSpeed`. Weak batteries slow it too. |
 | The flag doesn't move | No hardware PWM. | Make sure `dtoverlay=pwm,pin=18,func=2` is in `/boot/firmware/config.txt`, then reboot. The log names the PWM it found, "Mailbox flag servo on pwmchip0 channel 2" on a recent Pi 5; nothing else may claim GPIO18, such as an SPI overlay. |
 | The signal box logs "Couldn't find the default GPIO chip" | libgpiod isn't installed; the Pi 5 reaches its GPIO through it. | `sudo apt install libgpiod2` on Bookworm, `libgpiod3` on Trixie, or run `setup.sh` again. |
-| Santa's voice crackles, or the train drops its link while the Echo plays | One radio carries the Wi-Fi, the hub and the Echo. | Use a USB speaker, or give the train a USB Bluetooth adapter (`Train:BluetoothAdapter` `hci1`). |
+| The train drops its Bluetooth link | The hub is far from the Pi, or the one radio is busy with the Wi-Fi. | Give the train a USB Bluetooth adapter (`Train:BluetoothAdapter` `hci1`). |
 | The Pi resets when the flag moves | The servo draws too much from the Pi. | Give the servo its own 5 V supply, with a shared ground. |
 | The station board is lit but blank, or shows solid blocks | Contrast, or the LCD was never started. | Turn the trimmer. If the top row stays solid, check RS, E and D4 to D7, and that the signal box is running. |
 | The signal box waits for the MQTT broker | HQ isn't running, or, split across two Pis, can't be reached. | `systemctl status northpole-hq`. Split: check `Mqtt:Host` in the signal box's `appsettings.Pi.json`. |
@@ -465,10 +456,10 @@ The MQTT broker has **no authentication**. Anyone on the same network could ask 
 
 The whole system builds cleanly and runs end to end in simulation: wishes, the live journey, the Rudolph fallback, the dashboard, the cards and LEGO plans, and every station-board screen. Its Bluetooth messages and its sensor and LCD drivers are checked against reference implementations and simulated hardware.
 
-It has **not yet been run on the real hardware**: the LEGO hub over BlueZ, the sensors, servo, LEDs and LCD on the Pi 5's GPIO and PWM, Piper, and an Echo as the speaker. Expect some tuning on the day, and please open an issue if something doesn't work on your setup.
+It has **not yet been run on the real hardware**: the LEGO hub over BlueZ, the sensors, servo, LEDs and LCD on the Pi 5's GPIO and PWM, and Piper. Expect some tuning on the day, and please open an issue if something doesn't work on your setup.
 
 ## License
 
 [MIT](LICENSE).
 
-LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or endorse this project. Amazon Echo and Alexa are trademarks of Amazon. Claude is a trademark of Anthropic. Santa's voice comes from [Piper](https://github.com/rhasspy/piper) and its voice models, which have their own licences.
+LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or endorse this project. Claude is a trademark of Anthropic. Santa's voice comes from [Piper](https://github.com/rhasspy/piper) and its voice models, which have their own licences.
