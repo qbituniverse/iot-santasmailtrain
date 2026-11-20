@@ -17,8 +17,10 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if (-not $Snapshot) {
+    # By the time in the name (northpole-np-20261215-031500.tar.gz), which a copy can't change.
     $newest = Get-ChildItem $From -Filter 'northpole-*.tar.gz' -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        Sort-Object { if ($_.Name -match '-(\d{8}-\d{6})\.tar\.gz$') { $Matches[1] } else { '' } }, LastWriteTime -Descending |
+        Select-Object -First 1
     if (-not $newest) { throw "No snapshots in ${From}; name one with -Snapshot" }
     $Snapshot = $newest.FullName
 }

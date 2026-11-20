@@ -120,7 +120,7 @@ if want signalbox; then
 fi
 if want hq; then echo "  - Open http://np.local/elves on your phone, then 'QR cards & LEGO plans'."; fi
 if want backup; then
-  echo "  - Copy the snapshots off the Pi: on the PC, .\deploy\backup.ps1 (add -Schedule to run it daily)."
+  echo "  - Copy the snapshots off the Pi: on the PC, .\deploy\backup.ps1 -Schedule copies them every day."
   echo "    After a fresh card: setup.sh, then .\deploy\restore.ps1 and the sudo line it prints."
 fi
 echo "  Logs: journalctl -u northpole-hq -u northpole-signalbox -f"
