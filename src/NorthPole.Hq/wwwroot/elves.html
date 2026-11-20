@@ -87,6 +87,7 @@
       </section>
       <section class="panel danger" aria-labelledby="dangerTitle">
         <h2 id="dangerTitle">Danger zone</h2>
+        <div id="piStatus" class="muted">Checking…</div>
         <p class="muted">For the whole Pi: the train, Santa's voice and these pages all stop while it's down. The train
           brakes and lets go of the hub first.</p>
         <div class="actions">
@@ -127,6 +128,7 @@
   $('pin').addEventListener('input', () => { $('loginError').textContent = ''; });
 
   async function refresh() {
+    api('/pi').then(r => r.json()).then(renderPi).catch(e => { if (e.message !== 'login') console.error(e); });
     try {
       const [summary, wishes, train, speaker] = await Promise.all([
         api('/summary').then(r => r.json()),
@@ -250,6 +252,30 @@
         </div>
         ${w.hasPhoto ? `<img src="/api/elves/wishes/${w.id}/photo" alt="Drawing from ${esc(w.childName)}" loading="lazy">` : '<span></span>'}
       </article>`).join('') || '<p class="muted">No letters yet. Print the QR cards and wait for the first wish!</p>';
+  }
+
+  // The Pi's health, at the top of the danger zone: its temperature and whether it has had to slow down, from vcgencmd.
+  // The Pi 5 starts slowing itself down at 80 °C. The since-boot flags stay until the next reboot.
+  function renderPi(p) {
+    const lines = [];
+    const pills = [];
+    if (p.tempC != null) {
+      const kind = p.tempC >= 80 ? 'bad' : p.tempC >= 70 ? 'warn' : 'ok';
+      pills.push(`<span class="pill ${kind}">${p.tempC.toFixed(1)} °C</span>`);
+    }
+    if (p.throttled != null) {
+      const earlier = p.sinceBoot.filter(f => !p.now.includes(f));
+      pills.push(...p.now.map(f => `<span class="pill bad">${esc(f)} now</span>`),
+        ...earlier.map(f => `<span class="pill warn">${esc(f)} since boot</span>`));
+      if (!p.sinceBoot.length) pills.push('<span class="pill ok">Not throttled since boot</span>');
+      lines.push(`vcgencmd: temp ${p.tempC ?? '?'} °C · throttled=${esc(p.throttled)}`);
+    }
+    if (p.sinceBoot.includes('Under-voltage'))
+      lines.push("Under-voltage means the power supply or its cable can't keep up. The Pi 5 wants its own 5 A supply.");
+    if (p.tempC >= 75 || p.sinceBoot.includes('Soft temp limit')) lines.push('Running hot: give the Pi some air, or a fan.');
+    if (p.problem) lines.push(`<span class="problem">${esc(p.problem)}</span>`);
+    $('piStatus').innerHTML = (pills.length ? `<div class="pills">${pills.join('')}</div>` : '') +
+      lines.map((l, i) => `<div class="muted"${i || pills.length ? ' style="margin-top:6px"' : ''}>${l}</div>`).join('');
   }
 
   // The danger zone: reboots or shuts down the whole Pi, after a yes. A reboot waits for HQ to stop and come back, then

@@ -272,6 +272,9 @@ elves.MapGet("/cards", (FamilyService family, QrCards cards) =>
 elves.MapGet("/train", TrainStatus);
 elves.MapPost("/train/{command}", SendTrainCommand);
 
+// The danger zone's health line: the Pi's temperature and whether it has had to slow down, from vcgencmd.
+elves.MapGet("/pi", (CancellationToken ct) => PiHealth.ReadAsync(ct));
+
 // The danger zone: reboots or shuts down the whole Pi, with HQ, the signal box and Piper on it. 202 while it's on its
 // way; the page then waits for HQ to come back, or says when the Pi is off.
 elves.MapPost("/pi/{action}", async (PowerAction action, PiPower power, CancellationToken ct) =>
