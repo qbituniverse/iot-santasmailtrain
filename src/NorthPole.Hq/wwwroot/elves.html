@@ -85,6 +85,16 @@
         <h2>Shopping list</h2>
         <div id="shopping" class="muted">Gift ideas will appear here.</div>
       </section>
+      <section class="panel danger" aria-labelledby="dangerTitle">
+        <h2 id="dangerTitle">Danger zone</h2>
+        <p class="muted">For the whole Pi: the train, Santa's voice and these pages all stop while it's down. The train
+          brakes and lets go of the hub first.</p>
+        <div class="actions">
+          <button class="btn danger" data-power="Reboot">Reboot</button>
+          <button class="btn danger" data-power="Shutdown">Shut down</button>
+        </div>
+        <p class="muted" id="powerNote" role="status"></p>
+      </section>
     </div>
 
     <h2 style="margin:28px 0 0;font-size:18px">All letters</h2>
@@ -242,10 +252,53 @@
       </article>`).join('') || '<p class="muted">No letters yet. Print the QR cards and wait for the first wish!</p>';
   }
 
+  // The danger zone: reboots or shuts down the whole Pi, after a yes. A reboot waits for HQ to stop and come back, then
+  // reloads the page; a shutdown waits for HQ to stop, then says when it's safe to unplug.
+  const powerAsks = {
+    Reboot: 'Reboot the Pi? The train, Santa and these pages stop for about a minute, then come back by themselves.',
+    Shutdown: 'Shut down the Pi? It stays off until you unplug its power and plug it back in.',
+  };
+  let away = false; // the Pi is going: the page stops refreshing meanwhile
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const piAnswers = () => fetch('/api/elves/train', { cache: 'no-store', signal: AbortSignal.timeout(4000) })
+    .then(() => true, () => false);
+  async function waitForPi(answering, minutes) {
+    for (const until = Date.now() + minutes * 60000; Date.now() < until;) {
+      await sleep(3000);
+      if (await piAnswers() === answering) return true;
+    }
+    return false;
+  }
+
+  async function power(action) {
+    if (!confirm(powerAsks[action])) return;
+    const buttons = document.querySelectorAll('[data-power]');
+    const note = text => { $('powerNote').textContent = text; };
+    const giveUp = text => { note(text); away = false; buttons.forEach(x => { x.disabled = false; }); };
+    buttons.forEach(x => { x.disabled = true; });
+    note(action === 'Reboot' ? 'Rebooting…' : 'Shutting down…');
+    const res = await api('/pi/' + action, { method: 'POST' }).catch(err => {
+      giveUp(err.message === 'login' ? '' : "Couldn't reach the Pi.");
+      throw err;
+    });
+    if (!res.ok) return giveUp((await res.json().catch(() => ({}))).detail || `The Pi said no (${res.status}).`);
+
+    away = true;
+    if (!await waitForPi(false, 1)) return giveUp("HQ is still running a minute later, so the Pi didn't go. Check its logs.");
+    if (action === 'Shutdown') {
+      return note("The Pi is shutting down. When its light stays red, in about 20 seconds, it's safe to unplug. " +
+        'To start it again, plug the power back in.');
+    }
+    note('The Pi is restarting. This page comes back by itself in about a minute.');
+    if (await waitForPi(true, 4)) location.reload();
+    else giveUp("The Pi isn't back after 4 minutes. Check its light; if it's red, unplug the power and plug it back in.");
+  }
+
   document.addEventListener('click', async e => {
     const b = e.target.closest('button');
     if (!b) return;
     try {
+      if (b.dataset.power) await power(b.dataset.power);
       if (b.dataset.replay) await api(`/wishes/${b.dataset.replay}/replay`, { method: 'POST' });
       if (b.id === 'voiceTest') {
         b.disabled = true;
@@ -278,7 +331,7 @@
     }
     catch (e) { if (e.message !== 'login') console.error(e); }
   }
-  const showing = () => !$('app').hidden && !document.hidden;
+  const showing = () => !away && !$('app').hidden && !document.hidden;
   refresh();
   setInterval(() => { if (showing()) refreshLive(); }, 3000);
   setInterval(() => { if (showing()) refresh(); }, 15000);

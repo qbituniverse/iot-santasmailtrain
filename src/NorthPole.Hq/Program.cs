@@ -59,6 +59,7 @@ builder.Services.AddSingleton<StandbySettings>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<StandbySettings>());
 builder.Services.AddSingleton<WishPipeline>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<WishPipeline>());
+builder.Services.AddSingleton<PiPower>();
 
 // ---- Parents' dashboard: PIN → cookie, and a rate limit so small fingers can't brute-force it ----
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -270,6 +271,15 @@ elves.MapGet("/cards", (FamilyService family, QrCards cards) =>
 
 elves.MapGet("/train", TrainStatus);
 elves.MapPost("/train/{command}", SendTrainCommand);
+
+// The danger zone: reboots or shuts down the whole Pi, with HQ, the signal box and Piper on it. 202 while it's on its
+// way; the page then waits for HQ to come back, or says when the Pi is off.
+elves.MapPost("/pi/{action}", async (PowerAction action, PiPower power, CancellationToken ct) =>
+    !Enum.IsDefined(action)
+        ? Results.NotFound()
+        : await power.RequestAsync(action, ct) is { } why
+            ? Results.Problem(why, statusCode: StatusCodes.Status503ServiceUnavailable)
+            : Results.Accepted());
 
 // =================================================================================================
 // The train driver (/driver, from its own QR card): the train's status, Connect and Disconnect, and the driver's

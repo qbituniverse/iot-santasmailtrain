@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
+using static NorthPole.Hq.Processes;
 
 namespace NorthPole.Hq.Santa;
 
@@ -190,25 +191,6 @@ public sealed partial class StationSpeaker(IOptions<HqOptions> options, ILogger<
             return at > 0 ? name[..at] : name.Length > 0 ? name : m.Groups[2].Value.Trim();
         }
         return null;
-    }
-
-    static async Task<(int Code, string Output)> RunAsync(string command, IEnumerable<string> args, CancellationToken ct)
-    {
-        var psi = new ProcessStartInfo(command) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var arg in args) psi.ArgumentList.Add(arg);
-        try
-        {
-            using var process = Process.Start(psi);
-            if (process is null) return (-1, $"{command} didn't start");
-            var stdout = process.StandardOutput.ReadToEndAsync(ct);
-            var stderr = process.StandardError.ReadToEndAsync(ct);
-            await process.WaitForExitAsync(ct);
-            return (process.ExitCode, await stderr + await stdout);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return (-1, ex.Message);
-        }
     }
 
     static string? FirstLine(string text) =>

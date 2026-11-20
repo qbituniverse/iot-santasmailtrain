@@ -55,6 +55,14 @@ if want hq; then
     echo "!! Edit /etc/northpole/hq.env: paste your Claude API key, and set the dashboard PIN there"
   fi
 
+  # The dashboard's danger zone: HQ, running as you, may reboot or shut down the Pi, and run nothing else as root.
+  # visudo checks the rule before it goes in, because a broken file in sudoers.d stops sudo working at all.
+  rule=$(mktemp)
+  echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff" >"$rule"
+  if sudo visudo -cqf "$rule"; then sudo install -m 440 "$rule" /etc/sudoers.d/northpole-power
+  else echo "!! The reboot rule didn't pass visudo, so the dashboard's Reboot and Shut down won't work"; fi
+  rm -f "$rule"
+
   sed "s/__USER__/$USER/" piper.service | sudo tee /etc/systemd/system/piper.service >/dev/null
   sed "s/__USER__/$USER/" northpole-hq.service | sudo tee /etc/systemd/system/northpole-hq.service >/dev/null
   sudo systemctl daemon-reload
