@@ -161,8 +161,10 @@ public sealed class PoweredUpTrain(IOptions<SignalBoxOptions> options, ILoggerFa
 public sealed class BlueZTrain(IOptions<SignalBoxOptions> options, ILogger<BlueZTrain> log) : ITrain, IAsyncDisposable
 {
     const sbyte BrakePower = 127; // LWP: 127 = brake, 0 = float
+    static readonly TimeSpan MostWriteWait = TimeSpan.FromSeconds(5); // a confirmed write takes a few milliseconds
 
     readonly TrainOptions _o = options.Value.Train;
+    readonly SemaphoreSlim _writing = new(1, 1);
     BlueZDevice? _device;
     GattCharacteristic? _lwp;
     volatile bool _connected;
@@ -319,23 +321,37 @@ public sealed class BlueZTrain(IOptions<SignalBoxOptions> options, ILogger<BlueZ
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Sends one message to the hub, after any message still on its way. BlueZ takes one confirmed write at a time and
+    /// refuses a second with org.bluez.Error.InProgress, while the battery check, the brake from a Stop (or several, or
+    /// a run braking as it ends) and the driver's commands can all come at once. So they queue here instead.
+    /// </summary>
     async Task WriteAsync(byte[] message)
     {
         if (!_connected || _lwp is null)
             throw new InvalidOperationException("LEGO hub is not connected");
+        if (!await _writing.WaitAsync(MostWriteWait))
+            throw new TimeoutException("The hub is still busy with an earlier message");
 
         try
         {
-            await _lwp.WriteValueAsync(message, new Dictionary<string, object>());
+            var lwp = _lwp ?? throw new InvalidOperationException("LEGO hub is not connected"); // let go while waiting
+            await lwp.WriteValueAsync(message, new Dictionary<string, object>());
         }
-        catch
+        catch (Exception ex) when (!IsBusy(ex)) // a busy hub is still there
         {
             var was = _connected;
             _connected = false; // hub switched off or out of range: the signal box will reconnect
             if (was) StatusChanged?.Invoke();
             throw;
         }
+        finally
+        {
+            _writing.Release();
+        }
     }
+
+    static bool IsBusy(Exception ex) => ex is Tmds.DBus.DBusException { ErrorName: "org.bluez.Error.InProgress" };
 
     public async Task DisconnectAsync(CancellationToken ct)
     {
