@@ -228,6 +228,7 @@ Every value is one of three kinds:
 | `appsettings.json` | `/opt/northpole/signalbox/` | Speeds, battery limit, sensors, pins, the station board, timings | Plain |
 | `appsettings.Pi.json` | `/opt/northpole/signalbox/` | The broker address, `Train:Mode`, `Trackside:Mode`. It wins over `appsettings.json`, so change these three here | Plain |
 | `*.service` | `/etc/systemd/system/` | How systemd runs HQ, Piper and the signal box. Setup installs them | Plain |
+| `northpole-power` | `/etc/sudoers.d/` | Lets HQ, running as your user, run `systemctl reboot` and `systemctl poweroff`, and nothing else, for the dashboard's **Danger zone**. Setup installs it | Plain |
 
 ### `/etc/northpole/hq.env`
 
@@ -311,7 +312,7 @@ The Pi's default hostname is `np`, which keeps the QR address short. Replace `yo
    .\deploy\publish.ps1 -PiHost you@np.local
    ```
 4. **Wire the track** with the Pi switched off, as described in [Wiring the track](#wiring-the-track).
-5. **Run the setup.** It installs the .NET 10 runtime, Piper with a British voice, libgpiod (the Pi 5 reaches its GPIO through it), BlueZ, the servo's PWM overlay, and the three services. Then add your secrets and your family, and reboot:
+5. **Run the setup.** It installs the .NET 10 runtime, Piper with a British voice, libgpiod (the Pi 5 reaches its GPIO through it), BlueZ, the servo's PWM overlay, the three services, and the sudo rule behind the dashboard's **Reboot** and **Shut down**. Then add your secrets and your family, and reboot:
    ```bash
    ssh you@np.local
    cd ~/northpole-setup && bash setup.sh
@@ -335,7 +336,7 @@ sudo rsync -a --exclude 'appsettings*.json' ~/northpole-hq/ /opt/northpole/hq/ &
 sudo rsync -a --exclude 'appsettings*.json' ~/northpole-signalbox/ /opt/northpole/signalbox/ && sudo systemctl restart northpole-signalbox
 ```
 
-Running `setup.sh` again also keeps your settings files, and neither touches `hq.env` or `data/`. A setting that's new in an update uses its default until you add it.
+Running `setup.sh` again also keeps your settings files, and neither touches `hq.env` or `data/`. A setting that's new in an update uses its default until you add it. The dashboard's **Danger zone** needs the sudo rule that `setup.sh` adds: if **Reboot** says HQ isn't allowed, run `setup.sh` once more.
 
 ### Santa's speakers
 
@@ -381,10 +382,11 @@ Set `Santa:Language` (for example, "Polish"), download a matching [Piper voice](
 
 - Each morning, park the train at the mailbox and press its green button. Swap the six AAA batteries when the dashboard shows them low.
 - **Standby.** A connected hub draws about 70 mA just waiting, which empties six AAA cells in about half a day, so after 5 minutes with nothing happening the signal box lets it go and it switches itself off. Letters then go with Rudolph until someone presses **Connect** (and the hub's green button if its light is off). A slider on the dashboard sets the minutes, up to 30, or 0 for never; HQ keeps it in `data/standby.json`.
-- The dashboard (`http://np.local/elves`) has the train's status (how long the hub has been connected, its battery in percent and volts, and how fresh the news is, updated every few seconds), **Connect** and **Disconnect** for the train's hub, **Test run** and **Stop run**, a **Train driver** (Forward, Reverse and Stop, a speed slider in steps of 10 up to `MaxSpeed`, and the lights); **Santa's speakers** (whether their sound card is plugged in and for how long, what Santa is saying, when he last spoke, a **volume** slider, and **Test Santa's voice**, with a box for your own words); each child's **Extra wish today**; the shopping list; and every letter with its mood and Santa's reply. A worried or sad letter shows as an alert at the top.
+- The dashboard (`http://np.local/elves`) has the train's status (how long the hub has been connected, its battery in percent and volts, and how fresh the news is, updated every few seconds), **Connect** and **Disconnect** for the train's hub, **Test run** and **Stop run**, a **Train driver** (Forward, Reverse and Stop, a speed slider in steps of 10 up to `MaxSpeed`, and the lights); **Santa's speakers** (whether their sound card is plugged in and for how long, what Santa is saying, when he last spoke, a **volume** slider, and **Test Santa's voice**, with a box for your own words); each child's **Extra wish today**; the shopping list; a red **Danger zone** with **Reboot** and **Shut down** for the whole Pi; and every letter with its mood and Santa's reply. A worried or sad letter shows as an alert at the top.
 - **The Train Driver card** on **QR cards & LEGO plans** opens `http://np.local/driver`: the train's status, **Connect** and **Disconnect**, and the driver's Forward, Reverse, Stop, speed and lights, with no PIN and no Test run. Anyone on the home Wi-Fi with the card can drive; the signal box keeps its speed cap, won't drive during a mail run, and brakes if HQ goes quiet. **Stop** works there too, and ends a mail run as it does on the dashboard.
 - **Lost card?** On **QR cards & LEGO plans**, click **Lost this card? Make a new code** under it. The old card and its LEGO mosaic stop working at once, and the new card is ready to print.
-- **After a power cut** everything starts by itself, and today's unfinished letters carry on. If the dashboard shows the train Offline, press its green button, and make sure it's back at the mailbox before the next letter. For a planned shutdown, use `sudo poweroff` rather than pulling the plug.
+- **After a power cut** everything starts by itself, and today's unfinished letters carry on. If the dashboard shows the train Offline, press its green button, and make sure it's back at the mailbox before the next letter. For a planned shutdown, use the dashboard's **Shut down** (or `sudo poweroff`) rather than pulling the plug.
+- **The Danger zone** reboots or shuts down the whole Pi after you confirm. The train brakes and lets go of the hub first, and a few seconds later the Pi goes. After **Reboot** the page waits and reloads itself when HQ is back, in about a minute. After **Shut down** it tells you once HQ has stopped; unplug the power only when the Pi's light stays red, and plug it back in to start it again.
 
 ## Backups
 
@@ -419,7 +421,7 @@ HQ, and the AI behind it, can only *ask* the signal box to do things. The signal
 - **Disconnect** brakes, ends any run, lets the hub go and stops looking for it, so letters go with Rudolph until **Connect**. From start-up, and after Connect, the signal box looks for the hub until it finds it: press the hub's green button if its light isn't flashing.
 - The train driver works only between mail runs, and a letter sent while an elf is driving goes with Rudolph. A change of direction stops the train first, then pulls away the other way.
 
-The MQTT broker has **no authentication**. Anyone on the same network could ask for a test run, though these limits still apply, so run it on a trusted home network, never a guest or public one. The dashboard is behind a PIN, rate-limited to five tries in five minutes.
+The MQTT broker has **no authentication**. Anyone on the same network could ask for a test run, though these limits still apply, so run it on a trusted home network, never a guest or public one. The dashboard is behind a PIN, rate-limited to five tries in five minutes. HQ runs as your user; the only thing it can do as root is reboot or shut down the Pi, through a sudo rule for exactly those two commands, and only the dashboard asks it to.
 
 ## Troubleshooting
 
